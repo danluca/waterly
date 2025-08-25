@@ -1,0 +1,23 @@
+Product Description
+
+Features:
+1. The module adopts optocoupler isolation, which is stable and reliable, and has a long service life.
+2. The module adopts 5.0 pitch screw terminals for easy wiring. The module can play the role of isolation when the output level of the single-chip microcomputer drives the inductive devices such as motors and motors, and protect part of the circuit of the single-chip microcomputer against interference.
+3. The module can be used as an inverter, which can invert the input signal and output it. For example, some PLC input requires 24V voltage, which can be converted using this module.
+4. The module can be used for high-voltage detection. For example, if the output signal level of a sensor is 12V, and the voltage of the microcontroller is 5V, this module can be used for isolation detection.
+5. The module can also be used for current amplification. For example, when the output current of the microcontroller is too small to drive certain circuits, this module can be used for amplification.
+
+Product Parameters:
+Input signal voltage: 3-5V / 12V / 24V (optional).
+Output signal voltage: wide voltage, suitable for DC1.8 - 24V.
+Module size: 66x16.5x12mm (LWH).
+Module Weight: 5 Grams.
+
+PC817 Features:
+1. Isolation voltage, greater than 3000V.
+2. Input current, maximum 50mA.
+3. Working current, greater than 1mA.
+4. Maximum output current: 50mA (requires input current at 15-20mA)
+5. Working temperature: -55℃ - +110℃.
+6. Maximum application signal frequency: 5KHZ.
+

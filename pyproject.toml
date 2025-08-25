@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "GardenPy"
+version = "0.1.0"
+description = "Garden irrigation management with DFRobot SEN0604 RS485 soil sensor integration."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Dan Luca" }
+]
+keywords = ["irrigation", "garden", "modbus", "rs485", "soil", "sensor", "DFRobot", "SEN0604"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: Raspberry Pi OS",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+
+# Runtime dependencies for the sensor communication layer
+dependencies = [
+    "pyserial>=3.5",
+    "modbus-tk>=1.1.3",
+]
+
+[project.urls]
+Homepage = "https://example.com/garden-irrigation-management"
+Repository = "https://example.com/garden-irrigation-management.git"
+Issues = "https://example.com/garden-irrigation-management/issues"
+
+[tool.setuptools]
+# Include packages automatically if you structure code as a package
+# e.g., src/garden_irrigation_management/...
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*"]
