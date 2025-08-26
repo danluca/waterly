@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Dict
 
 
 class Measurement:
@@ -59,6 +58,21 @@ class Measurement:
         :rtype: datetime
         """
         return self.time
+
+    def json_encode(self):
+        return {
+            "__type__": "Measurement",
+            "time": self.time,
+            "value": self.data
+        }
+
+    @staticmethod
+    def json_decode(obj):
+        if "__type__" in obj and obj["__type__"] == "Measurement":
+            time = obj.get("time")
+            value = obj.get("value")
+            return Measurement(time, value)
+        return None
 
     def __str__(self) -> str:
         """
@@ -177,6 +191,27 @@ class Trend:
         """
         self.data.clear()
 
+    def json_encode(self):
+        return {
+            "__type__": "Trend",
+            "name": self.name,
+            "unit": self.unit,
+            "maxSamples": self.maxSamples,
+            "data": self.data
+        }
+
+    @staticmethod
+    def json_decode(obj):
+        if "__type__" in obj and obj["__type__"] == "Trend":
+            name = obj.get("name")
+            unit = obj.get("unit")
+            max_samples = obj.get("maxSamples")
+            data = obj.get("data")
+            t = Trend(name, unit, max_samples)
+            t.data = data
+            return t
+        return None
+
 
 class TrendSet:
     """
@@ -208,7 +243,7 @@ class TrendSet:
         :type max_samples: int
         """
         self._name: str = name
-        self.trends: Dict[str, Trend] = {}
+        self.trends: dict[str, Trend] = {}
         for zone_name in zone:
             self.trends[zone_name] = Trend(name, unit, max_samples)
 
@@ -289,3 +324,20 @@ class TrendSet:
         """
         for trend in self.trends.values():
             func(trend.data)
+
+    def json_encode(self):
+        return {
+            "__type__": "TrendSet",
+            "name": self.name,
+            "trends": self.trends
+        }
+
+    @staticmethod
+    def json_decode(obj):
+        if "__type__" in obj and obj["__type__"] == "TrendSet":
+            name = obj.get("name")
+            trends = obj.get("trends")
+            t = TrendSet([], name, "")
+            t.trends = trends
+            return t
+        return None

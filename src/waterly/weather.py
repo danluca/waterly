@@ -1,12 +1,11 @@
 import threading
 import pytz
 import logging
-from datetime import datetime, timedelta, tzinfo
-from typing import Optional
 import requests
 
-import src.waterly.config as config
-from .config import LATITUDE, LONGITUDE, WEATHER_CHECK_INTERVAL_SECONDS, DEFAULT_TIMEZONE, DATA_DIR
+from datetime import datetime, timedelta, tzinfo
+from typing import Optional
+from .config import DEFAULT_TIMEZONE, DATA_DIR, CONFIG, Settings
 from .storage import write_text_file
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
@@ -35,7 +34,7 @@ class WeatherService:
         self._lock = threading.RLock()
         self._next_12h_rain_prob: float = -1.0
         self._forecast_days: int = 3    # hardcoded for now using a common sense value
-        self._timezone: pytz.BaseTzInfo = config.LOCAL_TIMEZONE
+        self._timezone: pytz.BaseTzInfo = CONFIG[Settings.LOCAL_TIMEZONE]
         self._last_update: Optional[datetime] = None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="WeatherService", daemon=True)
@@ -137,12 +136,12 @@ class WeatherService:
         while not self._stop.is_set():
             try:
                 self._update_weather()
-                if (config.LOCAL_TIMEZONE is None) or (config.LOCAL_TIMEZONE != self.get_timezone()):
-                    self._logger.info(f"Local timezone changed from {config.LOCAL_TIMEZONE} to {self._timezone}")
-                    config.LOCAL_TIMEZONE = self._timezone
+                if (CONFIG[Settings.LOCAL_TIMEZONE] is None) or (CONFIG[Settings.LOCAL_TIMEZONE] != self.get_timezone()):
+                    self._logger.info(f"Local timezone changed from {CONFIG[Settings.LOCAL_TIMEZONE]} to {self._timezone}")
+                    CONFIG[Settings.LOCAL_TIMEZONE] = self._timezone
             except Exception as e:
                 self._logger.error(f"Weather update failed: {e}", exc_info=True)
-            self._stop.wait(WEATHER_CHECK_INTERVAL_SECONDS)
+            self._stop.wait(CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS])
 
     def _update_weather(self):
         """
@@ -157,8 +156,8 @@ class WeatherService:
         :return: None
         """
         params = {
-            "latitude": LATITUDE,
-            "longitude": LONGITUDE,
+            "latitude": CONFIG[Settings.LATITUDE],
+            "longitude": CONFIG[Settings.LONGITUDE],
             "hourly": "precipitation_probability,temperature_2m,precipitation,soil_moisture_1_to_3cm",
             "forecast_days": self._forecast_days,
             "timezone": "auto"  # Open-Meteo can auto-detect by coordinates

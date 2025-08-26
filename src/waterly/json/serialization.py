@@ -1,0 +1,166 @@
+import json
+import os
+import threading
+
+from enum import Enum
+from typing import Any
+from .times import _json_datetime_encoder, _json_datetime_decoder
+from ..model.trend import *     # needed to have available all model objects in the global scope
+
+
+#<editor-fold desc="JSON serialization helpers">
+def _json_default(o):
+    """
+    JSON serializer for custom types used in this project.
+    """
+    # Datetime -> ISO string
+    if isinstance(o, datetime):
+        return _json_datetime_encoder(o)
+
+    # Prefer a user-defined json_encode() when available
+    obj_encoder = getattr(o, "json_encode", None)
+    if callable(obj_encoder):
+        # noinspection PyBroadException
+        try:
+            return obj_encoder()
+        except Exception:
+            # Fall through to other strategies if json_encode() fails
+            pass
+
+    # Enum -> value
+    # noinspection PyBroadException
+    try:
+        if isinstance(o, Enum):
+            return o.value
+    except Exception:
+        pass
+
+    # Generic object: use its __dict__ as a last resort
+    if hasattr(o, "__dict__"):
+        return o.__dict__
+
+    # Fallback to string representation
+    return str(o)
+
+def _json_object_hook(obj: dict) -> Any:
+    """
+    Decode a JSON object into a specific Python object or retain its dictionary form.
+    This function tries to identify and decode objects based on their ``__type__`` field,
+    if it is provided or utilizes class-specific decoders when available. If no specific
+    decoding logic applies, the function returns the object as it is.
+
+    :param obj: The JSON object or dictionary to decode.
+    :type obj: dict
+    :return: The decoded Python object or the original input if no specific decoding is applied.
+    :rtype: Any
+    """
+    if not isinstance(obj, dict):
+        return obj
+
+    # Try to use class-specific decoder if type is specified
+    if "__type__" in obj and isinstance(obj["__type__"], str):
+        class_name:str = obj.get("__type__")
+        match class_name:
+            case "datetime":
+                return _json_datetime_decoder(obj)
+            case _:
+                # Find our class in the current module
+                cls = globals().get(class_name)
+                if cls and ".waterly." in cls.__module__ and hasattr(cls, "json_decode") and callable(cls.json_decode):
+                    # noinspection PyBroadException
+                    try:
+                        return cls.json_decode(obj)
+                    except Exception:
+                        pass
+
+    return obj
+
+#</editor-fold>
+
+
+class ThreadSafeJSON:
+    """
+    ThreadSafeJSON provides a thread-safe interface for reading and updating JSON
+    configurations stored in a file.
+
+    This class ensures proper synchronization using a reentrant lock, allowing
+    safe concurrent access to the JSON file. It also creates the file's directory
+    structure if it does not exist and initializes the file with a default value
+    if it is missing. Operations such as reading and updating the file are
+    protected to avoid race conditions or data corruption during concurrent use.
+
+    :ivar path: Path to the JSON file.
+    :type path: str
+    :ivar default: Default value to initialize the file with if it does not exist.
+    :type default: Any
+    """
+    def __init__(self, path: str, default: Any):
+        self.path = path
+        self.default = default
+        self._lock = threading.RLock()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if not os.path.exists(path):
+            self._write(default)
+
+    def _read(self) -> Any:
+        """
+        Reads and parses a JSON file using UTF-8 encoding.
+
+        The method opens the file specified by the `path` attribute in read mode
+        with UTF-8 encoding, then loads and returns its content as a Python object.
+        The returned object represents the parsed JSON data.
+
+        :return: The parsed JSON content as a Python object
+        :rtype: Any
+        """
+        with open(self.path, "r", encoding="utf-8") as f:
+            return json.load(f, object_hook=_json_object_hook)
+
+    def _write(self, content: Any):
+        """
+        Writes the given content to a temporary file in JSON format and renames
+        it to the target file path. This ensures the atomicity of the write
+        operation to avoid incomplete or corrupted writes.
+
+        :param content: The content to be written to the file. It must be
+            serializable to JSON format.
+        """
+        tmp_path = self.path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(content, f, indent=2, default=_json_default)
+        os.replace(tmp_path, self.path)
+
+    def read(self) -> Any:
+        """
+        Reads data in a thread-safe manner. If an exception is encountered during the
+        read operation, it resets the data to a default value and returns this default.
+
+        :return: The value read by the internal `_read` method or the default value if
+            an exception occurs.
+        :rtype: Any
+        """
+        with self._lock:
+            # noinspection PyBroadException
+            try:
+                return self._read()
+            except Exception:
+                self._write(self.default)
+                return self.default
+
+    def update(self, updater):
+        """
+        Updates the stored data using the provided updater function. The method reads
+        the current data, applies the updater function to modify it, writes the updated
+        data back, and returns the updated result.
+
+        :param updater: Function that accepts the current data as an input and returns
+                        the updated data.
+        :type updater: Callable
+        :return: The updated data after applying the updater function.
+        :rtype: Any
+        """
+        with self._lock:
+            data = self.read()
+            updated = updater(data)
+            self._write(updated)
+            return updated

@@ -4,43 +4,11 @@ import logging
 from datetime import datetime, time as dtime
 from typing import Optional
 
-from .config import SENSOR_READ_INTERVAL_SECONDS
+from .config import CONFIG, Settings
 from .patch import Patch
 from .pulses import PulseCounter
-from .storage import settings_store, record_npk, record_rh, record_water_liters, Settings
+from .storage import record_npk, record_rh, record_water_liters
 from .weather import WeatherService
-
-
-def _read_settings():
-    """
-    Reads settings for watering parameters (humidity target, watering start time, maximum watering
-    duration per zone, rain cancel probability threshold) from a settings store.
-    If any parsing errors occur, defaults are used.
-
-    :raises ValueError: If any value cannot be properly converted to its expected type.
-
-    :return: A tuple containing:
-        - `humidity_target_percent` as a float, representing the target
-          humidity percentage.
-        - `watering_start_time` as a `dtime` object, indicating the time at
-          which watering starts.
-        - `watering_max_minutes_per_zone` as an integer, specifying the
-          maximum number of minutes per zone for watering.
-        - `rain_cancel_probability_threshold` as a float, representing the
-          threshold probability to cancel watering due to rain.
-    :rtype: tuple[float, dtime, int, float]
-    """
-    s = settings_store.read()
-    target = float(s.get(Settings.HUMIDITY_TARGET_PERCENT, Settings.HUMIDITY_TARGET_PERCENT.default))
-    start_str = s.get(Settings.WATERING_START_TIME, Settings.WATERING_START_TIME.default)
-    max_minutes = int(s.get(Settings.WATERING_MAX_MINUTES_PER_ZONE, Settings.WATERING_MAX_MINUTES_PER_ZONE.default))
-    rain_thr = float(s.get(Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD, Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD.default))
-    try:
-        hh, mm = [int(x) for x in start_str.split(":")]
-        start_time = dtime(hh, mm)
-    except Exception:
-        start_time = dtime(20, 30)
-    return target, start_time, max_minutes, rain_thr
 
 
 class WateringManager:
@@ -74,11 +42,11 @@ class WateringManager:
         self._thread = threading.Thread(target=self._run, name="WateringManager", daemon=True)
         self._last_watering_date: Optional[str] = None
         self._last_humidity_reading: dict[str, float] = {}
-        self._rh_target: float = Settings.HUMIDITY_TARGET_PERCENT.default
-        hh, mm = [int(x) for x in Settings.WATERING_START_TIME.default.split(":")]
+        self._rh_target: float = CONFIG[Settings.HUMIDITY_TARGET_PERCENT]
+        hh, mm = [int(x) for x in CONFIG[Settings.WATERING_START_TIME].split(":")]
         self._start_time: dtime = dtime(hh, mm)
-        self._max_minutes: int = Settings.WATERING_MAX_MINUTES_PER_ZONE.default
-        self._rain_thr: float = Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD.default
+        self._max_minutes: int = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
+        self._rain_thr: float = CONFIG[Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD]
         self._logger = logging.getLogger(__name__)
 
     def start(self):
@@ -90,7 +58,12 @@ class WateringManager:
         :raises RuntimeError: If the thread fails to start properly.
         """
         self._thread.start()
-        self._last_watering_date, self._rh_target, self._start_time, self._max_minutes, self._rain_thr = _read_settings()
+        self._last_watering_date = CONFIG[Settings.LAST_WATERING_DATE]
+        self._rh_target = CONFIG[Settings.HUMIDITY_TARGET_PERCENT]
+        hh, mm = [int(x) for x in CONFIG[Settings.WATERING_START_TIME].split(":")]
+        self._start_time = dtime(hh, mm)
+        self._max_minutes = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
+        self._rain_thr = CONFIG[Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD]
 
     def stop(self):
         """
@@ -104,6 +77,35 @@ class WateringManager:
         for patch in self.patches:
             patch.water_state = False
 
+    def _parse_month_day(self, md: str) -> tuple[int, int]|None:
+        """
+        Parse a MM-DD string into (month, day). Falls back to defaults with logging if invalid.
+        """
+        try:
+            m_str, d_str = md.split("-", 1)
+            m, d = int(m_str), int(d_str)
+            if not (1 <= m <= 12 and 1 <= d <= 31):
+                raise ValueError("month/day out of range")
+            return m, d
+        except Exception as e:
+            self._logger.error(f"Invalid gardening season day format '{md}', expected 'MM-DD': {e}")
+            return None
+
+    def _is_in_gardening_season(self, dt: datetime) -> bool:
+        """
+        Returns True if the given datetime falls within the configured gardening season (inclusive).
+        Handles seasons that may wrap across the new year.
+        """
+        t = (dt.month, dt.day)
+        start_md = self._parse_month_day(CONFIG[Settings.GARDENING_SEASON_START]) or self._parse_month_day(Settings.GARDENING_SEASON_START.default)
+        end_md = self._parse_month_day(CONFIG[Settings.GARDENING_SEASON_END]) or self._parse_month_day(Settings.GARDENING_SEASON_END.default)
+        if start_md <= end_md:
+            # Non-wrapping season (e.g., 03-31 .. 10-31)
+            return start_md <= t <= end_md
+        else:
+            # Wrapping season (e.g., 11-01 .. 03-31)
+            return t >= start_md or t <= end_md
+
     def _run(self):
         """
         Monitors and manages periodic sensor polling, orchestrates the daily watering
@@ -116,7 +118,7 @@ class WateringManager:
         self._logger.info("Starting WateringManager")
         # Sensors polling loop and daily schedule orchestration
         last_poll:int = 0
-        poll_interval:int = SENSOR_READ_INTERVAL_SECONDS
+        poll_interval:int = CONFIG[Settings.SENSOR_READ_INTERVAL_SECONDS]
         while not self._stop.is_set():
             epoch = int(time.time())
             # Poll sensors periodically
@@ -128,6 +130,11 @@ class WateringManager:
             today_key = now.strftime("%Y-%m-%d")
             if self._last_watering_date != today_key:
                 if now.time() >= self._start_time:
+                    if not self._is_in_gardening_season(now):
+                        self._logger.warning(f"Skipping watering - current time {now.isoformat()} is "
+                        f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON_START]} to {CONFIG[Settings.GARDENING_SEASON_END]}")
+                        self._last_watering_date = today_key
+                        continue
                     # Decide if we cancel due to rain or already on target humidity
                     rain_prob = self.weather.get_next_12h_rain_probability()
                     if rain_prob >= self._rain_thr:
@@ -172,6 +179,7 @@ class WateringManager:
         :type max_minutes_per_zone: int
         :return: None
         """
+
         self._logger.info("Starting watering cycle")
         try:
             for patch in sorted(self.patches, key=lambda p: p.zone.name):

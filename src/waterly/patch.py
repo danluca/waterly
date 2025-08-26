@@ -2,7 +2,7 @@ import logging
 from typing import Optional
 from gpiozero import OutputDevice
 
-from .zone import Zone
+from .model.zone import Zone
 from .dfrobot import SEN0604, SEN0605
 
 class Patch:

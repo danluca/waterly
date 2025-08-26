@@ -1,9 +1,9 @@
 import logging
 import os
-import src.waterly.config as config
+
 from logging.handlers import TimedRotatingFileHandler
 from datetime import datetime
-from .config import LOG_DIR
+from .config import CONFIG, Settings, LOG_DIR
 
 LOG_FILE = "app-%TIME%.log"
 
@@ -19,7 +19,7 @@ def init_logging(level: int = logging.INFO) -> None:
         return  # Already initialized
 
     os.makedirs(LOG_DIR, exist_ok=True)
-    now = datetime.now(config.LOCAL_TIMEZONE)
+    now = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
     logfile = os.path.join(LOG_DIR, LOG_FILE.replace("%TIME%", now.strftime("%Y-%m")))
 
     fmt = "%(asctime)s %(levelname)s [%(threadName)s] [%(name)s] %(message)s"
