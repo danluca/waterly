@@ -1,7 +1,8 @@
 import threading
-import RPi.GPIO as GPIO
 import logging
 
+from typing import Optional
+from gpiozero import Button
 from .config import PULSE_GPIO_PIN, WATER_FLOW_FREQUENCY_FACTOR
 
 class PulseCounter:
@@ -21,28 +22,10 @@ class PulseCounter:
     :type _started: bool
     """
     def __init__(self):
-        """
-        Counter class used to manage a count value with thread-safety.
-
-        This class provides a foundation for managing a count value that can be
-        used in a multi-threaded environment. The counting mechanism is protected
-        by a reentrant lock to ensure thread-safety. The initial state of the count
-        is zero.
-
-        Attributes
-        ----------
-        count : int
-            Publicly accessible attribute representing the current count value.
-        lock : threading.RLock
-            Publicly accessible attribute representing the reentrant lock used
-            for thread-safety.
-        started : bool
-            Publicly accessible attribute indicating whether the counter
-            has been started.
-        """
         self._count: int = 0
         self._lock = threading.RLock()
         self._started = False
+        self._button: Optional[Button] = None
 
     def start(self):
         """
@@ -56,9 +39,10 @@ class PulseCounter:
         """
         if self._started:
             return
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(PULSE_GPIO_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
-        GPIO.add_event_detect(PULSE_GPIO_PIN, GPIO.FALLING, callback=self._cb, bouncetime=5)
+        # Using gpiozero Button with pull_up=True matches the original FALLING-edge approach:
+        # the sensor pulls the line low; when_pressed corresponds to the falling edge.
+        self._button = Button(PULSE_GPIO_PIN, pull_up=True, bounce_time=0.005)
+        self._button.when_pressed = self._cb
         self._started = True
         logging.getLogger(__name__).info(f"PulseCounter started on GPIO {PULSE_GPIO_PIN}")
 
@@ -71,8 +55,13 @@ class PulseCounter:
         """
         if not self._started:
             return
-        GPIO.cleanup(PULSE_GPIO_PIN)
+        if self._button is not None:
+            # Detach callback and release the GPIO resource
+            self._button.when_pressed = None
+            self._button.close()
+            self._button = None
         self._started = False
+        logging.getLogger(__name__).info(f"PulseCounter stopped on GPIO {PULSE_GPIO_PIN}")
 
     def _cb(self, channel):
         """

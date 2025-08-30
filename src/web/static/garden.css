@@ -1,0 +1,9 @@
+body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; }
+h1 { margin-bottom: 0; }
+small { color: #666; }
+pre { background: #f7f7f7; padding: 10px; overflow: auto; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.card { border: 1px solid #ddd; border-radius: 6px; padding: 12px; }
+label { display: block; margin-top: 6px; }
+input[type="text"], input[type="number"] { width: 120px; }
+.footer { margin-top: 24px; color: #666; font-size: 12px; }

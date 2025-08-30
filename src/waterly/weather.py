@@ -155,6 +155,10 @@ class WeatherService:
         :raises requests.exceptions.RequestException: For other request-related exceptions' response.
         :return: None
         """
+        # if the last update is too recent, skip
+        if CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP] and (datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]) - CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]) < timedelta(seconds=CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS]):
+            self._logger.info(f"Weather update skipped due to recent update {CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP].isoformat()}")
+            return
         params = {
             "latitude": CONFIG[Settings.LATITUDE],
             "longitude": CONFIG[Settings.LONGITUDE],
@@ -191,4 +195,5 @@ class WeatherService:
         with self._lock:
             self._next_12h_rain_prob = prob
             self._last_update = now
+        CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP] = now
         self._logger.info(f"Weather updated. Next 12h rain probability: {prob*100:.2f}%")

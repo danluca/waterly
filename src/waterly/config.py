@@ -6,7 +6,19 @@ import threading
 from typing import Any
 from enum import StrEnum, Enum
 from datetime import datetime
+from pathlib import Path
 from .model.zone import Zone
+
+def get_project_root():
+    """
+    Gets the root directory of the project by navigating two levels up from
+    the current file's directory.
+
+    :return: The root directory of the project as a pathlib.Path object.
+    :rtype: Path
+    """
+    root_path = Path(__file__).parent.parent
+    return root_path if root_path.exists() else None
 
 #<editor-fold desc="Constants, Factory Settings">
 # local timezone of the system - updated by the weather service
@@ -23,8 +35,8 @@ PULSE_GPIO_PIN = 21
 WATER_FLOW_FREQUENCY_FACTOR = 5.5
 
 # Paths
-DATA_DIR = "data"
-LOG_DIR = "logs"
+DATA_DIR = f"{get_project_root()}/data"
+LOG_DIR = f"{get_project_root()}/logs"
 
 # Zones and sensors IDs
 ZONES = {
@@ -66,6 +78,7 @@ class Settings(StrEnum):
     RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 0.50   # 50%
     UNITS = "units", Unit.IMPERIAL
     WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours
+    WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", None
     SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", 60*10            # 10 minutes
     TREND_MAX_SAMPLES = "trend_max_samples", 52000                                  # ~ 1 year worth of samples
     LOCAL_TIMEZONE = "local_timezone", DEFAULT_TIMEZONE.zone
@@ -211,7 +224,7 @@ class AppConfig:
             self._write_to_file()   # when read from the backing file fails, write the defaults as starting point
 
     def __getitem__(self, arg: Settings) -> Any:
-        return AppConfig.__unmarshal__(arg, self.settings[arg.name])
+        return AppConfig.__unmarshal__(arg, self.settings.get(arg.name))
 
     def __setitem__(self, arg: Settings, value: Any):
         self.settings[arg.name] = AppConfig.__marshal__(arg, value)

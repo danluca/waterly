@@ -7,9 +7,13 @@ for DFRobot sensors.
 from __future__ import annotations
 
 from typing import Optional
+
+import modbus_tk
 import serial
 import modbus_tk.defines as cst
 from modbus_tk import modbus_rtu
+from modbus_tk import exceptions as mdb_exc
+
 
 RS485_PORT = "/dev/serial0"
 
@@ -53,6 +57,7 @@ class BaseRS485ModbusSensor:
         )
         self._master = modbus_rtu.RtuMaster(self._serial)
         self._master.set_timeout(timeout)
+        self._is_present:bool = False
 
     def close(self) -> None:
         """
@@ -64,6 +69,7 @@ class BaseRS485ModbusSensor:
 
         :return: None
         """
+        # noinspection PyBroadException
         try:
             self._serial.close() if self._serial.is_open else None
         except Exception:
@@ -82,8 +88,46 @@ class BaseRS485ModbusSensor:
         # noinspection PyBroadException
         try:
             self._serial.open() if not self._serial.is_open else None
+            self.get_device_address()   # forces a read to update the device presence status
         except Exception:
             pass
+
+    @property
+    def is_open(self) -> bool:
+        """
+        Indicates whether the serial connection is currently open.
+
+        :return: A boolean indicating if the serial connection is open.
+        :rtype: bool
+        """
+        return self._serial.is_open
+
+    @property
+    def is_present(self) -> bool:
+        """
+        Indicates whether the sensor is present - i.e. the device address was valid at least once.
+        This is not an indication of whether the sensor is connected. Use `is_connected()` for that.
+
+        :return: A boolean indicating if the sensor is present
+        :rtype: bool
+        """
+        return self._is_present
+
+    def is_connected(self) -> bool:
+        """
+        Checks if the device is connected by verifying the presence of a valid device address.
+
+        This method determines whether the device is connected by checking if a non-
+        `None` device address is available. The result is `True` when two conditions are met:
+        - The serial connection is open.
+        - The device address is not `None` (can be verified lively by reading the register).
+
+        :return: True if the device is connected, otherwise False
+        :rtype: bool
+        """
+        if not self._serial.is_open:
+            return False
+        return self.get_device_address() is not None
 
     # Optional helpers (if supported by firmware)
     def get_device_address(self) -> Optional[int]:
@@ -160,6 +204,27 @@ class BaseRS485ModbusSensor:
         self._serial.open()
 
     # Low-level utilities
+    def __read_registers(self, func:int, addr:int, count:int):
+        """
+        Reads registers from a Modbus device using the specified function code, starting
+        address, and count of registers to read. Updates the device presence status based
+        on the outcome.
+
+        :param func: Modbus function code used to read the registers
+        :param addr: Starting address of the registers to read
+        :param count: Number of registers to read
+        :return: Data read from the Modbus device as returned by the master instance, or
+            None if an exception occurs
+        """
+        try:
+            data = self._master.execute(self.device_addr, func, addr, count)
+            self._is_present = True
+            return data
+        except mdb_exc.ModbusError as _:
+            self._is_present = True
+        except (serial.SerialTimeoutException, TimeoutError, OSError) as _:
+            self._is_present = False
+
     def _read_one(self, reg_addr: int) -> int:
         """
         Try reading as Input Register first (0x04), then Holding Register (0x03).
@@ -167,10 +232,10 @@ class BaseRS485ModbusSensor:
         """
         # noinspection PyBroadException
         try:
-            data = self._master.execute(self.device_addr, cst.READ_INPUT_REGISTERS, reg_addr, 1)
+            data = self.__read_registers(cst.READ_INPUT_REGISTERS, reg_addr, 1)
             return int(data[0] & 0xFFFF)
         except Exception:
-            data = self._master.execute(self.device_addr, cst.READ_HOLDING_REGISTERS, reg_addr, 1)
+            data = self.__read_registers(cst.READ_HOLDING_REGISTERS, reg_addr, 1)
             return int(data[0] & 0xFFFF)
 
     def _read_many(self, reg_addrs: list[int]) -> dict[int, int]:
@@ -187,11 +252,32 @@ class BaseRS485ModbusSensor:
         for func in (cst.READ_INPUT_REGISTERS, cst.READ_HOLDING_REGISTERS):
             # noinspection PyBroadException
             try:
-                block = self._master.execute(self.device_addr, func, first, span)
+                block = self.__read_registers(func, first, span)
                 return {addr: int(block[addr - first] & 0xFFFF) for addr in reg_addrs}
             except Exception:
                 continue
         return {addr: self._read_one(addr) for addr in reg_addrs}
 
     def _write_one(self, reg_addr: int, value: int) -> None:
-        self._master.execute(self.device_addr, cst.WRITE_SINGLE_REGISTER, reg_addr, output_value=value)
+        """
+        Writes a single value to a register via Modbus communication. This function internally
+        handles whether the operation sets the device as present or not based on success or failure
+        of the operation. The implementation ensures that device presence status is updated even
+        in case of exceptions like `ModbusError`, `SerialTimeoutException`, `TimeoutError` or `OSError`.
+
+        The method communicates with the device using its specific address and attempts to
+        write the provided value to the specified register address.
+
+        :param reg_addr: Register address to which the value needs to be written.
+        :type reg_addr: int
+        :param value: The value to be written to the register.
+        :type value: int
+        :return: None
+        """
+        try:
+            _ = self._master.execute(self.device_addr, cst.WRITE_SINGLE_REGISTER, reg_addr, output_value=value)
+            self._is_present = True
+        except mdb_exc.ModbusError as _:
+            self._is_present = True
+        except (serial.SerialTimeoutException, TimeoutError, OSError) as _:
+            self._is_present = False

@@ -2,16 +2,18 @@ import signal
 import time
 import logging
 
-from .config import HTTP_HOST, HTTP_PORT
+from .config import ZONES
+from .patch import Patch
 from .pulses import PulseCounter
 from .scheduler import WateringManager
 from .weather import WeatherService
-from .web import WebServer
-from .storage import record_event
 from .log import init_logging
+from .web import create_app, run_app
+
 
 def main():
     init_logging()
+    logger = logging.getLogger("main")
     # Hardware/services
     weather = WeatherService()
     pulses = PulseCounter()
@@ -20,19 +22,27 @@ def main():
     weather.start()
     pulses.start()
 
-    manager = WateringManager(relays, hum_sensors, npk_sensors, weather, pulses)
+    patches = [
+        Patch(ZONES[1]),
+        Patch(ZONES[2]),
+        Patch(ZONES[3])
+    ]
+
+    manager = WateringManager(patches, weather, pulses)
     manager.start()
 
-    web = WebServer(weather, pulses, HTTP_HOST, HTTP_PORT)
-    web.start()
+    logger.info("Starting web server...")
 
-    record_event("System started")
+    create_app()
+    run_app()
 
     # Graceful shutdown
     stop = False
+
     def handle_sig(signum, frame):
         nonlocal stop
         stop = True
+
     signal.signal(signal.SIGINT, handle_sig)
     signal.signal(signal.SIGTERM, handle_sig)
 
@@ -40,11 +50,11 @@ def main():
         while not stop:
             time.sleep(0.5)
     finally:
-        record_event("Shutting down...")
-        web.stop()
+        logger.info("Shutting down...")
         manager.stop()
         weather.stop()
         pulses.stop()
+
 
 if __name__ == "__main__":
     main()

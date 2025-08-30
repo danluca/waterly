@@ -7,7 +7,7 @@ from typing import Optional
 from .config import CONFIG, Settings
 from .patch import Patch
 from .pulses import PulseCounter
-from .storage import record_npk, record_rh, record_water_liters
+from .storage import record_npk, record_rh, record_water_liters, TrendName
 from .weather import WeatherService
 
 
@@ -134,14 +134,17 @@ class WateringManager:
                         self._logger.warning(f"Skipping watering - current time {now.isoformat()} is "
                         f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON_START]} to {CONFIG[Settings.GARDENING_SEASON_END]}")
                         self._last_watering_date = today_key
+                        CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         continue
                     # Decide if we cancel due to rain or already on target humidity
                     rain_prob = self.weather.get_next_12h_rain_probability()
                     if rain_prob >= self._rain_thr:
                         self._logger.info(f"Watering canceled due to rain forecast: {rain_prob*100:.2f}% > {self._rain_thr*100:.2f}%")
+                        CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         self._last_watering_date = today_key
                     else:
                         self._perform_watering(self._rh_target, self._max_minutes)
+                        CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         self._last_watering_date = today_key
             self._stop.wait(5.0)
 
@@ -154,15 +157,28 @@ class WateringManager:
         :return: None
         :rtype: None
         """
+        self._logger.info("Polling sensors for all zones")
         for patch in self.patches:
             try:
-                sensor_readings = patch.measurements() # tuple of temp, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium
-                self._last_humidity_reading[patch.zone.name] = sensor_readings[1]
-                record_rh(patch.zone.name, sensor_readings[1], sensor_readings[0], sensor_readings[3], sensor_readings[2], sensor_readings[4], sensor_readings[5])
-                if len(sensor_readings) > 6:
-                    record_npk(patch.zone.name, sensor_readings[6], sensor_readings[7], sensor_readings[8])
+                patch.open_sensor_bus()
+                self._logger.info(f"Polling sensors for zone {patch.zone.name}...")
+                sensor_readings = patch.measurements() # dictionary of temp, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium
+                if sensor_readings.get(TrendName.TEMPERATURE) is not None:
+                    self._last_humidity_reading[patch.zone.name] = sensor_readings[TrendName.HUMIDITY]
+                    record_rh(patch.zone.name, sensor_readings[TrendName.HUMIDITY], sensor_readings[TrendName.TEMPERATURE],
+                              sensor_readings[TrendName.PH], sensor_readings[TrendName.ELECTRICAL_CONDUCTIVITY],
+                              sensor_readings[TrendName.SALINITY], sensor_readings[TrendName.TOTAL_DISSOLVED_SOLIDS])
+                    self._logger.info(f"RHTemp sensor {patch.rh_sensor.device_addr:#02X} readings for zone {patch.zone.name} have been recorded")
+                if sensor_readings.get(TrendName.NITROGEN) is not None:
+                    record_npk(patch.zone.name, sensor_readings[TrendName.NITROGEN], sensor_readings[TrendName.PHOSPHORUS],
+                               sensor_readings[TrendName.POTASSIUM])
+                    self._logger.info(f"NPK sensor {patch.npk_sensor.device_addr:#02X} readings for zone {patch.zone.name} have been recorded")
+                if not sensor_readings:
+                    self._logger.warning(f"No sensor readings available for zone {patch.zone.name} - sensor disconnected?")
             except Exception as e:
                 self._logger.error(f"Sensors reading failed for zone {patch.zone.name}: {e}", exc_info=True)
+        self.patches[0].close_sensor_bus()      # leverages the first patch to close the bus, sensors are all on same bus
+        self._logger.info("Sensors polling finished")
 
     def _perform_watering(self, target_humidity: float, max_minutes_per_zone: int):
         """
@@ -184,7 +200,7 @@ class WateringManager:
         try:
             for patch in sorted(self.patches, key=lambda p: p.zone.name):
                 # check whether humidity is already above target for this zone
-                if self._last_humidity_reading[patch.zone.name] is not None and self._last_humidity_reading[patch.zone.name] >= self._rh_target:
+                if self._last_humidity_reading.get(patch.zone.name) is not None and self._last_humidity_reading[patch.zone.name] >= self._rh_target:
                     self._logger.info(f"Watering canceled for zone {patch.zone.name} due to target humidity reached: {self._last_humidity_reading[patch.zone.name]:.2f}% >= {self._rh_target:.2f}%")
                     continue
 
@@ -193,7 +209,7 @@ class WateringManager:
                 zone_done = False
                 while not zone_done and (int(time.time()) - start_ts) < (max_minutes_per_zone * 60):
                     # Read humidity
-                    moist = patch.humidity()
+                    moist = patch.humidity() if patch.has_rh_sensor else None
                     # Wait a bit and measure water
                     time.sleep(10)
                     # Check humidity threshold

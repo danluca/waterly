@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Garden Watering</title>
+  <link rel="stylesheet" href="/static/garden.css">
+  <script src="/static/garden.js" lang="JavaScript"></script>
+</head>
+<body>
+  <h1>Lucas Garden Water Control System</h1>
+  <small>Simple management UI</small>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Settings</h3>
+      <form method="POST" action="/api/settings">
+        <label>Humidity target (%): <input name="humidity_target_percent" type="number" step="0.1" required value="{humidity_target_percent}"></label>
+        <label>Start time (HH:MM): <input name="watering_start_time" type="text" required value="{watering_start_time}"></label>
+        <label>Max minutes / zone: <input name="watering_max_minutes_per_zone" type="number" min="1" required value="{watering_max_minutes_per_zone}"></label>
+        <label>Rain cancel prob (0-1): <input name="rain_cancel_probability_threshold" type="number" min="0" max="1" step="0.01" required value="{rain_cancel_probability_threshold}"></label>
+        <label>Units:
+          <select name="units">
+            <option value="metric" {metric_sel}>Metric (L)</option>
+            <option value="imperial" {imperial_sel}>Imperial (gal)</option>
+          </select>
+        </label>
+        <p><button type="submit">Save</button></p>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>Weather</h3>
+      <p>Next 24h rain probability: <strong>{rain_prob_pct}%</strong></p>
+      <form method="POST" action="/api/simulate_pulses">
+        <label>Simulate pulses (dev only): <input name="pulses" type="number" min="0" value="0"></label>
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px;">
+    <h3>Latest Trends (most recent 20)</h3>
+    <pre id="trends">{trends_json}</pre>
+  </div>
+
+  <div class="footer">Zones: {zones}</div>
+</body>
+</html>

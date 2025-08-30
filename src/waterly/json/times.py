@@ -1,6 +1,6 @@
 import pytz
 from datetime import datetime
-from src.waterly.config import CONFIG, Settings
+from ..config import CONFIG, Settings
 
 def _json_datetime_encoder(dt:datetime) -> dict[str, str]:
     """

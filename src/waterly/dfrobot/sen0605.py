@@ -30,6 +30,57 @@ from .base_sensor import BaseRS485ModbusSensor, RS485_PORT
 
 
 class SEN0605(BaseRS485ModbusSensor):
+    """
+    Represents the SEN0605 sensor for measuring soil nutrient levels, including nitrogen,
+    phosphorus, and potassium concentrations. This class provides methods for reading
+    and writing nutrient concentrations, coefficients, and deviations, allowing for
+    detailed nutrient monitoring and adjustment.
+
+    SEN0605 is designed to interact with soil and provide accurate measurements in mg/kg
+    for various nutrient types. It also supports configuration of calibration coefficients
+    and deviation values for improved accuracy during nutrient readings.
+
+    Example usage:
+        >>> sensor = SEN0605(port=RS485_PORT)
+        >>> try:
+        >>>     n, p, k = sensor.read_all()
+        >>>     print(f"N: {n} mg/kg")
+        >>>     print(f"P: {p} mg/kg")
+        >>>     print(f"K: {k} mg/kg")
+        >>> finally:
+        >>>     sensor.close()
+
+    :ivar REG_NITROGEN: Register address for nitrogen concentration measurement (mg/kg).
+    :type REG_NITROGEN: int
+    :ivar REG_PHOSPHORUS: Register address for phosphorus concentration measurement (mg/kg).
+    :type REG_PHOSPHORUS: int
+    :ivar REG_POTASSIUM: Register address for potassium concentration measurement (mg/kg).
+    :type REG_POTASSIUM: int
+    :ivar REG_NITROGEN_COEFFICIENT_HI: Register address for the high 16 bits of
+        the temporary nitrogen coefficient (floating point).
+    :type REG_NITROGEN_COEFFICIENT_HI: int
+    :ivar REG_NITROGEN_COEFFICIENT_LO: Register address for the low 16 bits of
+        the temporary nitrogen coefficient (floating point).
+    :type REG_NITROGEN_COEFFICIENT_LO: int
+    :ivar REG_NITROGEN_DEVIATION: Register address for nitrogen deviation value (integer).
+    :type REG_NITROGEN_DEVIATION: int
+    :ivar REG_PHOSPHORUS_COEFFICIENT_HI: Register address for the high 16 bits of
+        the temporary phosphorus coefficient (floating point).
+    :type REG_PHOSPHORUS_COEFFICIENT_HI: int
+    :ivar REG_PHOSPHORUS_COEFFICIENT_LO: Register address for the low 16 bits of
+        the temporary phosphorus coefficient (floating point).
+    :type REG_PHOSPHORUS_COEFFICIENT_LO: int
+    :ivar REG_PHOSPHORUS_DEVIATION: Register address for phosphorus deviation value (integer).
+    :type REG_PHOSPHORUS_DEVIATION: int
+    :ivar REG_POTASSIUM_COEFFICIENT_HI: Register address for the high 16 bits of
+        the temporary potassium coefficient (floating point).
+    :type REG_POTASSIUM_COEFFICIENT_HI: int
+    :ivar REG_POTASSIUM_COEFFICIENT_LO: Register address for the low 16 bits of
+        the temporary potassium coefficient (floating point).
+    :type REG_POTASSIUM_COEFFICIENT_LO: int
+    :ivar REG_POTASSIUM_DEVIATION: Register address for potassium deviation value (integer).
+    :type REG_POTASSIUM_DEVIATION: int
+    """
     # Register map (per wiki)
     REG_NITROGEN = 0x001E    # mg/kg
     REG_PHOSPHORUS = 0x001F  # mg/kg
@@ -163,15 +214,3 @@ class SEN0605(BaseRS485ModbusSensor):
         Sets the temporary value of potassium content deviation (integer value).
         """
         self._write_one(self.REG_POTASSIUM_DEVIATION, value)
-
-
-if __name__ == "__main__":
-    # Example usage (update port as needed):
-    sensor = SEN0605(port=RS485_PORT)
-    try:
-        n, p, k = sensor.read_all()
-        print(f"N: {n} mg/kg")
-        print(f"P: {p} mg/kg")
-        print(f"K: {k} mg/kg")
-    finally:
-        sensor.close()

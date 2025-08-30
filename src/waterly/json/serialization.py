@@ -66,7 +66,7 @@ def _json_object_hook(obj: dict) -> Any:
             case _:
                 # Find our class in the current module
                 cls = globals().get(class_name)
-                if cls and ".waterly." in cls.__module__ and hasattr(cls, "json_decode") and callable(cls.json_decode):
+                if cls and "waterly." in cls.__module__ and hasattr(cls, "json_decode") and callable(cls.json_decode):
                     # noinspection PyBroadException
                     try:
                         return cls.json_decode(obj)

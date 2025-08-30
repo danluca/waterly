@@ -24,6 +24,60 @@ from .base_sensor import BaseRS485ModbusSensor, RS485_PORT
 
 
 class SEN0604(BaseRS485ModbusSensor):
+    """
+    Represents the SEN0604 sensor for measuring soil properties via RS485 Modbus.
+
+    This class provides methods to interact with the SEN0604 soil sensor, enabling
+    the reading and writing of sensor data including temperature, moisture,
+    electrical conductivity, pH, and related coefficients. It communicates
+    via RS485 Modbus protocol and manages register-level operations internally.
+
+    Example usage:
+        >>> sensor = SEN0604(port="/dev/ttyUSB0")  # Create sensor instance
+        >>> try:
+        >>>     # Read all sensor values at once
+        >>>     temp, moisture, ec, ph = sensor.read_all()
+        >>>     print(f"Temperature: {temp:.1f} °C")
+        >>>     print(f"Moisture: {moisture:.1f} %")
+        >>>     print(f"EC: {ec} µS/cm") 
+        >>>     print(f"pH: {ph:.2f}")
+        >>>
+        >>>     # Or read individual values
+        >>>     temp_c = sensor.read_temperature_c()
+        >>>     temp_f = sensor.read_temperature_f()
+        >>>     moisture = sensor.read_moisture()
+        >>>     ec = sensor.read_ec()
+        >>>     ph = sensor.read_ph()
+        >>> finally:
+        >>>     sensor.close()  # Always close the connection
+
+    :ivar REG_MOISTURE: Register address for reading moisture level (0.1% units).
+    :type REG_MOISTURE: int
+    :ivar REG_TEMPERATURE: Register address for reading temperature (0.1 °C units).
+    :type REG_TEMPERATURE: int
+    :ivar REG_EC: Register address for reading electrical conductivity (µS/cm).
+    :type REG_EC: int
+    :ivar REG_PH: Register address for reading pH level (0.1 pH units).
+    :type REG_PH: int
+    :ivar REG_SALINITY: Register address for reading salinity value (reference only).
+    :type REG_SALINITY: int
+    :ivar REG_TDS: Register address for reading Total Dissolved Solids (reference only).
+    :type REG_TDS: int
+    :ivar REG_EC_COEFFICIENT: Register address for reading and writing the EC coefficient.
+    :type REG_EC_COEFFICIENT: int
+    :ivar REG_SALINITY_COEFFICIENT: Register address for reading and writing the salinity coefficient.
+    :type REG_SALINITY_COEFFICIENT: int
+    :ivar REG_TDS_COEFFICIENT: Register address for reading and writing the TDS coefficient.
+    :type REG_TDS_COEFFICIENT: int
+    :ivar REG_TEMP_CALIBRATION: Register address for reading and writing temperature calibration.
+    :type REG_TEMP_CALIBRATION: int
+    :ivar REG_MOISTURE_CALIBRATION: Register address for reading and writing moisture calibration.
+    :type REG_MOISTURE_CALIBRATION: int
+    :ivar REG_EC_CALIBRATION: Register address for reading and writing EC calibration.
+    :type REG_EC_CALIBRATION: int
+    :ivar REG_PH_CALIBRATION: Register address for reading and writing pH calibration.
+    :type REG_PH_CALIBRATION: int
+    """
     # Register map (per wiki) [[1]](https://wiki.dfrobot.com/RS485_Soil_Sensor_Temperature_Humidity_EC_PH_SKU_SEN0604)
     # READ ONLY
     REG_MOISTURE = 0x0000     # 0.1 %
@@ -304,17 +358,3 @@ class SEN0604(BaseRS485ModbusSensor):
         :param value: The pH calibration value to be set.
         """
         self._write_one(self.REG_PH_CALIBRATION, value)
-
-
-if __name__ == "__main__":
-    # Example usage:
-    # Update the serial port to match your RS485 adapter (e.g., "COM5" on Windows, "/dev/ttyUSB0" on Linux)
-    sensor = SEN0604(port="/dev/ttyUSB0")
-    try:
-        t, m, ec, ph = sensor.read_all()
-        print(f"Temperature: {t:.1f} °C")
-        print(f"Moisture:    {m:.1f} %")
-        print(f"EC:          {ec} µS/cm")
-        print(f"pH:          {ph:.1f}")
-    finally:
-        sensor.close()

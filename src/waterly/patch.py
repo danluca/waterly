@@ -4,6 +4,8 @@ from gpiozero import OutputDevice
 
 from .model.zone import Zone
 from .dfrobot import SEN0604, SEN0605
+from .storage import TrendName
+
 
 class Patch:
     """
@@ -102,7 +104,36 @@ class Patch:
         :return: True if the patch has an NPK sensor, False otherwise.
         :rtype: bool
         """
-        return self.npk_sensor is not None
+        return self.npk_sensor is not None and self.npk_sensor.is_present
+
+    @property
+    def has_rh_sensor(self) -> bool:
+        """
+        Checks if the patch has a relative humidity sensor.
+
+        :return: True if the patch has a relative humidity sensor, False otherwise.
+        :rtype: bool
+        """
+        return self.rh_sensor is not None and self.rh_sensor.is_present
+
+    def open_sensor_bus(self):
+        """
+        Opens the serial connection to the sensors.
+
+        :return: None
+        :rtype: None
+        """
+        self.rh_sensor.open() if self.rh_sensor else None
+        self.npk_sensor.open() if self.npk_sensor else None
+
+    def close_sensor_bus(self):
+        """
+        Closes the serial connection to the sensors
+
+        :return: None
+        """
+        self.rh_sensor.close() if self.has_rh_sensor else None
+        self.npk_sensor.close() if self.has_npk_sensor else None
 
     def humidity(self) -> float:
         """
@@ -111,13 +142,9 @@ class Patch:
         :return: The relative humidity as a float.
         :rtype: float
         """
-        try:
-            self.rh_sensor.open()
-            return self.rh_sensor.read_moisture()
-        finally:
-            self.rh_sensor.close()
+        return self.rh_sensor.read_moisture() if self.has_rh_sensor and self.rh_sensor.is_open else None
 
-    def temperature(self, iso: bool = False) -> float:
+    def temperature(self, iso: bool = False) -> float | None:
         """
         Fetches the current temperature read by the sensor, either in Celsius or Fahrenheit degrees based on
         the input parameter. Defaults to Fahrenheit.
@@ -127,11 +154,9 @@ class Patch:
         :return: The current temperature as reported by the sensor.
         :rtype: float
         """
-        try:
-            self.rh_sensor.open()
-            return self.rh_sensor.read_temperature_c() if iso else self.rh_sensor.read_temperature_f()
-        finally:
-            self.rh_sensor.close()
+        if not (self.has_rh_sensor and self.rh_sensor.is_open):
+            return None
+        return self.rh_sensor.read_temperature_c() if iso else self.rh_sensor.read_temperature_f()
 
     def electric_conductivity(self) -> int:
         """
@@ -144,11 +169,7 @@ class Patch:
         :return: The electric conductivity value measured by the RH sensor.
         :rtype: int
         """
-        try:
-            self.rh_sensor.open()
-            return self.rh_sensor.read_ec()
-        finally:
-            self.rh_sensor.close()
+        return self.rh_sensor.read_ec() if self.has_rh_sensor and self.rh_sensor.is_open else None
 
     def ph(self) -> float:
         """
@@ -160,11 +181,7 @@ class Patch:
         :return: The pH value measured by the sensor.
         :rtype: float
         """
-        try:
-            self.rh_sensor.open()
-            return self.rh_sensor.read_ph()
-        finally:
-            self.rh_sensor.close()
+        return self.rh_sensor.read_ph() if self.has_rh_sensor and self.rh_sensor.is_open else None
 
     def salinity(self) -> int:
         """
@@ -175,11 +192,7 @@ class Patch:
         :return: The salinity value as an integer.
         :rtype: int
         """
-        try:
-            self.rh_sensor.open()
-            return self.rh_sensor.read_salinity()
-        finally:
-            self.rh_sensor.close()
+        return self.rh_sensor.read_salinity() if self.has_rh_sensor and self.rh_sensor.is_open else None
 
     def total_dissolved_solids(self) -> int:
         """
@@ -191,11 +204,7 @@ class Patch:
         :return: Total dissolved solids (TDS) value as an integer.
         :rtype: int
         """
-        try:
-            self.rh_sensor.open()
-            return self.rh_sensor.read_tds()
-        finally:
-            self.rh_sensor.close()
+        return self.rh_sensor.read_tds() if self.has_rh_sensor and self.rh_sensor.is_open else None
 
     def nitrogen(self) -> int | None:
         """
@@ -207,13 +216,7 @@ class Patch:
         :return: The nitrogen level as an integer from the sensor.
         :rtype: int
         """
-        if not self.has_npk_sensor:
-            return None
-        try:
-            self.npk_sensor.open()
-            return self.npk_sensor.read_nitrogen()
-        finally:
-            self.npk_sensor.close()
+        return self.npk_sensor.read_nitrogen() if self.has_npk_sensor and self.npk_sensor.is_open else None
 
     def phosphorus(self) -> int | None:
         """
@@ -225,13 +228,7 @@ class Patch:
         :return: The phosphorus level as detected by the NPK sensor.
         :rtype: int
         """
-        if not self.has_npk_sensor:
-            return None
-        try:
-            self.npk_sensor.open()
-            return self.npk_sensor.read_phosphorus()
-        finally:
-            self.npk_sensor.close()
+        return self.npk_sensor.read_phosphorus() if self.has_npk_sensor and self.npk_sensor.is_open else None
 
     def potassium(self) -> int | None:
         """
@@ -243,15 +240,9 @@ class Patch:
         :return: The potassium level as detected by the NPK sensor.
         :rtype: int
         """
-        if not self.has_npk_sensor:
-            return None
-        try:
-            self.npk_sensor.open()
-            return self.npk_sensor.read_potassium()
-        finally:
-            self.npk_sensor.close()
+        return self.npk_sensor.read_potassium() if self.has_npk_sensor and self.npk_sensor.is_open else None
 
-    def measurements(self) -> tuple[float, float, int, float, int, int] | tuple[float, float, int, float, int, int, int, int, int]:
+    def measurements(self) -> dict[TrendName, float|int|None]:
         """
         Convenience method to retrieve all measurements from the sensors.
 
@@ -262,16 +253,19 @@ class Patch:
         :return: A tuple containing the measurements from the sensors: either (temperature, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium) or (temperature, humidity, ec, ph, salinity, tds)
         :rtype: tuple[float, float, int, float, int, int] | tuple[float, float, int, float, int, int, int, int, int]
         """
-        try:
-            self.rh_sensor.open()
+        readings: dict[TrendName, float|int|None] = {}
+        if self.has_rh_sensor and self.rh_sensor.is_open:
             rh_all = self.rh_sensor.read_all()
-            sal = self.rh_sensor.read_salinity()
-            tds = self.rh_sensor.read_tds()
-            # both sensors are on the same serial port (RS485), opening RH sensor above also covered NPK sensor
-            if self.has_npk_sensor:
-                npk_all = self.npk_sensor.read_all()
-                return rh_all + (sal, tds) + npk_all
-            else:
-                return rh_all + (sal, tds)
-        finally:
-            self.rh_sensor.close()
+            readings[TrendName.TEMPERATURE] = rh_all[0]
+            readings[TrendName.HUMIDITY] = rh_all[1]
+            readings[TrendName.ELECTRICAL_CONDUCTIVITY] = rh_all[2]
+            readings[TrendName.PH] = rh_all[3]
+            readings[TrendName.SALINITY] = self.rh_sensor.read_salinity()
+            readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = self.rh_sensor.read_tds()
+        # both sensors are on the same serial port (RS485)
+        if self.has_npk_sensor and self.npk_sensor.is_open:
+            npk_all = self.npk_sensor.read_all()
+            readings[TrendName.NITROGEN] = npk_all[0]
+            readings[TrendName.PHOSPHORUS] = npk_all[1]
+            readings[TrendName.POTASSIUM] = npk_all[2]
+        return readings
