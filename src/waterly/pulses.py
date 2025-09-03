@@ -88,9 +88,22 @@ class PulseCounter:
         with self._lock:
             self._count += max(0, int(pulses))
 
-    def read_and_reset_liters(self, seconds: float) -> float:
+    def reset_count(self) -> None:
         """
-        Calculates the amount of water (in liters) that passed within a given duration
+        Resets the count to zero in a thread-safe manner.
+
+        This method acquires a lock to ensure that the operation is
+        performed safely in a multi-threaded environment. The internal
+        counter `_count` is reset to zero during the operation.
+
+        :return: None
+        """
+        with self._lock:
+            self._count = 0
+
+    def read_and_reset(self, metric: bool) -> float:
+        """
+        Calculates the amount of water (in liters) that passed since a reset call was issued
         and resets the current pulse count to zero.
 
         The calculation is based on the relationship between pulses, frequency, and
@@ -100,23 +113,23 @@ class PulseCounter:
         This function assumes that pulse measurements are accumulated until this call
         and resets the count upon execution.
 
-        :param seconds: Duration in seconds over which the pulses were counted.
-        :type seconds: float
-        :return: Calculated volume of water in liters based on the measured pulses and
-            duration.
+        :param metric: Whether the returned value should be in metric units (liters) or
+            imperial units (gallons).
+        :type metric: bool
+        :return: Calculated volume of water in liters or gallons based on the measured pulses since reset.
         :rtype: float
         """
-        # Convert counted pulses to liters based on duration.
+        # Convert counted pulses to liters - turns out the duration is irrelevant
         # Spec: freq(Hz) = 5.5 * flow(L/min)
         # pulses = freq * seconds
         # flow(L/min) = freq / 5.5 = pulses/seconds / 5.5
-        # liters = flow(L/min) * (seconds / 60)
+        # liters = flow(L/min) * (seconds / 60) = pulses / 5.5 / 60 = pulses / 330
         with self._lock:
             pulses = self._count
             self._count = 0
-        if seconds <= 0:
+        if pulses <= 0:
             return 0.0
-        freq = pulses / seconds
-        flow_lpm = freq / WATER_FLOW_FREQUENCY_FACTOR
-        liters = flow_lpm * (seconds / 60.0)
-        return liters
+        liters = pulses / WATER_FLOW_FREQUENCY_FACTOR / 60.0
+        if metric:
+            return liters
+        return liters / 3.785411784 # gallons

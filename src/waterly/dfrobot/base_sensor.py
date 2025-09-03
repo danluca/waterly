@@ -232,10 +232,10 @@ class BaseRS485ModbusSensor:
         """
         # noinspection PyBroadException
         try:
-            data = self.__read_registers(cst.READ_INPUT_REGISTERS, reg_addr, 1)
+            data = self.__read_registers(cst.READ_HOLDING_REGISTERS, reg_addr, 1)
             return int(data[0] & 0xFFFF)
         except Exception:
-            data = self.__read_registers(cst.READ_HOLDING_REGISTERS, reg_addr, 1)
+            data = self.__read_registers(cst.READ_INPUT_REGISTERS, reg_addr, 1)
             return int(data[0] & 0xFFFF)
 
     def _read_many(self, reg_addrs: list[int]) -> dict[int, int]:
@@ -249,7 +249,7 @@ class BaseRS485ModbusSensor:
         first = reg_addrs[0]
         last = reg_addrs[-1]
         span = last - first + 1
-        for func in (cst.READ_INPUT_REGISTERS, cst.READ_HOLDING_REGISTERS):
+        for func in (cst.READ_HOLDING_REGISTERS, cst.READ_INPUT_REGISTERS):
             # noinspection PyBroadException
             try:
                 block = self.__read_registers(func, first, span)

@@ -4,6 +4,7 @@ import logging
 
 from .config import ZONES
 from .patch import Patch
+from .storage import init_default_trends, create_trends_store
 from .pulses import PulseCounter
 from .scheduler import WateringManager
 from .weather import WeatherService
@@ -14,6 +15,12 @@ from .web import create_app, run_app
 def main():
     init_logging()
     logger = logging.getLogger("main")
+
+    logger.info("Starting application...")
+    # Storage
+    init_default_trends()
+    create_trends_store()
+
     # Hardware/services
     weather = WeatherService()
     pulses = PulseCounter()

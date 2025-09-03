@@ -1,22 +1,10 @@
 import os
 from datetime import datetime, UTC, tzinfo
-from typing import Any, Dict
+from typing import Any
 from enum import StrEnum
-from .config import DATA_DIR, CONFIG, Settings, ZONES
+from .config import DATA_DIR, CONFIG, Settings, ZONES, Unit
 from .model.trend import TrendSet, Measurement
 from .json.serialization import ThreadSafeJSON
-
-def _get_current_year() -> str:
-    """
-    Gets the current year as a string.
-
-    This function retrieves the current year using the system's date and time,
-    formats it as a string, and returns it.
-
-    :return: The current year formatted as a string.
-    :rtype: str
-    """
-    return str(datetime.now().year)
 
 def write_text_file(path: str, content: str) -> None:
     """
@@ -59,8 +47,8 @@ class RollingThreadSafeJSON(ThreadSafeJSON):
     """
     def __init__(self, path: str, default: Any):
         self._pathPattern = path
-        if "%YEAR%" not in self._pathPattern:
-            raise ValueError("Path pattern must contain %YEAR% placeholder")
+        if ("%YEAR%" not in self._pathPattern) and ("%MONTH%" not in self._pathPattern):
+            raise ValueError("Path pattern must contain both %YEAR% and %MONTH% placeholders")
         # Initialize base with the resolved current-year path; the file is created at the correct location immediately
         super().__init__(self.get_current_file_path(), default)
 
@@ -75,7 +63,8 @@ class RollingThreadSafeJSON(ThreadSafeJSON):
         :return: The updated file path with the year properly replaced.
         :rtype: str
         """
-        return self._pathPattern.replace("%YEAR%", _get_current_year())
+        dt = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
+        return self._pathPattern.replace("%YEAR%", dt.strftime("%Y")).replace("%MONTH%", dt.strftime("%m_%b"))
 
     def read(self) -> Any:
         """
@@ -122,24 +111,65 @@ class TrendName(StrEnum):
     PHOSPHORUS = "phosphorus"
     POTASSIUM = "potassium"
     WATER = "water"
-    LOG = "events"
+    RPI_TEMPERATURE = "rpitemp"
 
-DEFAULT_TRENDS: dict[TrendName, TrendSet] = {
-    TrendName.HUMIDITY: TrendSet([z.name for z in ZONES.values()], TrendName.HUMIDITY, "%", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.TEMPERATURE: TrendSet([z.name for z in ZONES.values()], TrendName.TEMPERATURE, "°F", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.PH: TrendSet([z.name for z in ZONES.values()], TrendName.PH, "pH", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.ELECTRICAL_CONDUCTIVITY: TrendSet([z.name for z in ZONES.values()], TrendName.ELECTRICAL_CONDUCTIVITY, "µS/cm", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.SALINITY: TrendSet([z.name for z in ZONES.values()], TrendName.SALINITY, "ppt", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.TOTAL_DISSOLVED_SOLIDS: TrendSet([z.name for z in ZONES.values()], TrendName.TOTAL_DISSOLVED_SOLIDS, "ppm", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.NITROGEN: TrendSet([z.name for z in ZONES.values()], TrendName.NITROGEN, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.PHOSPHORUS: TrendSet([z.name for z in ZONES.values()], TrendName.PHOSPHORUS, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.POTASSIUM: TrendSet([z.name for z in ZONES.values()], TrendName.POTASSIUM, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES]),
-    TrendName.WATER: TrendSet([z.name for z in ZONES.values()], TrendName.WATER, "L", CONFIG[Settings.TREND_MAX_SAMPLES]),
-}
-# Trends storage path
-TRENDS_FILE = f"{DATA_DIR}/%YEAR%/trends.json"
+__rpi_zone_name = "RPI"
 
-trends_store = RollingThreadSafeJSON(TRENDS_FILE, DEFAULT_TRENDS)
+DEFAULT_TRENDS: dict[TrendName, TrendSet] = {}
+trends_store: dict[TrendName, RollingThreadSafeJSON] = {}
+
+def init_default_trends():
+    """
+    Initializes default trend configurations for various environmental metrics if they are not
+    already defined. The function populates the global `DEFAULT_TRENDS` dictionary with trend
+    data associated with different environmental metrics like humidity, temperature, pH, salinity,
+    and nutrient levels. Trends are created based on the predefined zones and associated configuration
+    settings such as unit system and maximum sample size.
+
+    :param DEFAULT_TRENDS: Global dictionary intended to store predefined environmental trend
+                           data mapped by trend names.
+    :type DEFAULT_TRENDS: dict
+
+    :raises KeyError: If specific keys required from configuration `CONFIG` are unavailable.
+
+    :return: None
+    """
+    global DEFAULT_TRENDS
+
+    if len(DEFAULT_TRENDS) > 0:
+        return
+
+    metric:bool = CONFIG[Settings.UNITS] == Unit.METRIC
+    DEFAULT_TRENDS[TrendName.HUMIDITY] = TrendSet([z.name for z in ZONES.values()], TrendName.HUMIDITY, "%", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.TEMPERATURE] = TrendSet([z.name for z in ZONES.values()], TrendName.TEMPERATURE, "°C" if metric else "°F", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.PH] = TrendSet([z.name for z in ZONES.values()], TrendName.PH, "pH", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY] = TrendSet([z.name for z in ZONES.values()], TrendName.ELECTRICAL_CONDUCTIVITY, "µS/cm", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.SALINITY] = TrendSet([z.name for z in ZONES.values()], TrendName.SALINITY, "ppt", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS] = TrendSet([z.name for z in ZONES.values()], TrendName.TOTAL_DISSOLVED_SOLIDS, "ppm", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.NITROGEN] = TrendSet([z.name for z in ZONES.values()], TrendName.NITROGEN, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.PHOSPHORUS] = TrendSet([z.name for z in ZONES.values()], TrendName.PHOSPHORUS, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.POTASSIUM] = TrendSet([z.name for z in ZONES.values()], TrendName.POTASSIUM, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.WATER] = TrendSet([z.name for z in ZONES.values()], TrendName.WATER, "L" if metric else "gal", CONFIG[Settings.TREND_MAX_SAMPLES])
+    DEFAULT_TRENDS[TrendName.RPI_TEMPERATURE] = TrendSet([__rpi_zone_name], TrendName.RPI_TEMPERATURE, "°C" if metric else "°F", CONFIG[Settings.TREND_MAX_SAMPLES])
+
+def create_trends_store():
+    """
+    Initializes the `trends_store` global variable with instances of RollingThreadSafeJSON for
+    each trend in TrendName if it is not already populated.
+
+    The `trends_store` is filled with paths to JSON files for each trend, where the file paths are
+    formatted to include the respective year and month. These files are used to store trend data,
+    with default values sourced from `DEFAULT_TRENDS`.
+
+    :return: None
+    """
+    global trends_store
+
+    if len(trends_store) > 0:
+        return
+
+    for trendName in TrendName:
+        trends_store[trendName] = RollingThreadSafeJSON(f"{DATA_DIR}/%YEAR%/%MONTH%_{trendName.value}.json", DEFAULT_TRENDS[trendName])
 
 def _now_utc() -> datetime:
     return datetime.now(UTC)
@@ -154,49 +184,179 @@ def _now_local_str(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE], fmt: str = "%FT
     return datetime.now(tz).strftime(fmt)
 
 def record_measurement(trend: TrendName, zone: str, value: float|int):
-    def _upd(data: Dict[TrendName, TrendSet]):
-        data[trend].add_value(zone, Measurement(_now_local(), value))
+    """
+    Records a measurement for a specific trend and zone with the given value.
+
+    This function updates the trends store by adding a new measurement for the
+    specified trend and zone. The measurement is timestamped with the current
+    local time.
+
+    :param trend: The name of the trend to update
+    :type trend: TrendName
+    :param zone: The identifier for the zone
+    :type zone: str
+    :param value: The measurement value to record. Can be a float or an integer.
+    :type value: float | int
+    :return: None
+    """
+    def _upd(data: TrendSet):
+        data.add_value(zone, Measurement(_now_local(), value))
         return data
-    trends_store.update(_upd)
+    trends_store[trend].update(_upd)
 
 def record_humidity(zone: str, value: float):
+    """
+    Records the humidity measurement for a specified zone. This function provides
+    a way to associate a humidity trend with the given location and its value.
+
+    :param zone: The name of the zone or location where the humidity measurement
+        is being recorded.
+    :type zone: str
+    :param value: The humidity level to be recorded, represented as a floating-point
+        number.
+    :type value: float
+    :return: None
+    """
     record_measurement(TrendName.HUMIDITY, zone, value)
 
 def record_temperature(zone: str, value: float):
+    """
+    Records a temperature measurement for a specified zone. The function captures
+    the temperature value and associates it with the specified zone.
+
+    :param zone: The name of the zone for which the temperature is being recorded.
+    :type zone: str
+    :param value: The temperature value to record.
+    :type value: float
+    :return: None
+    """
     record_measurement(TrendName.TEMPERATURE, zone, value)
 
 def record_electrical_conductivity(zone: str, value: int):
+    """
+    Records the electrical conductivity measurement for a specified zone with the given value.
+
+    This function is responsible for logging or saving the electrical conductivity data associated
+    with a specific zone.
+
+    :param zone: The name of the zone for which the electrical conductivity measurement is being recorded.
+    :type zone: str
+    :param value: The numerical value of the electrical conductivity measurement.
+    :type value: int
+    :return: None
+    """
     record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, value)
 
 def record_total_dissolved_solids(zone: str, value: int):
+    """
+    Records the measurement of total dissolved solids for a specified zone.
+
+    This function logs a measurement for the total dissolved solids in a designated zone.
+
+    :param zone: The name of the zone for which the measurement is being recorded.
+    :type zone: str
+    :param value: The measured value of total dissolved solids to be recorded.
+    :type value: int
+    """
     record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, value)
 
 def record_ph(zone: str, value: float):
+    """
+    Records the pH measurement for the specified zone.
+
+    :param zone: The identifier of the zone where the measurement is obtained.
+    :type zone: str
+    :param value: The pH value recorded for the specified zone.
+    :type value: float
+    :return: None
+    """
     record_measurement(TrendName.PH, zone, value)
 
 def record_salinity(zone: str, value: int):
+    """
+    Records the salinity measurement for a specified zone.
+
+    :param zone: The zone identifier where the salinity measurement is taken.
+    :type zone: str
+    :param value: The salinity value to be recorded.
+    :type value: int
+    :return: None
+    """
     record_measurement(TrendName.SALINITY, zone, value)
 
+def record_rpi_temperature(value: float):
+    """
+    Records the temperature measurement of the Raspberry Pi board. This function assigns
+    the measurement to a specific trend and a default zone specific to the Raspberry Pi
+    temperature context.
+
+    :param value: The temperature value of the Raspberry Pi board to record in the unit configured for the trend.
+    :type value: float
+    """
+    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, value)      # the RPI board temperature is not zone-specific; using always zone 1
+
 def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, tds: int):
-    def _upd(data: Dict[TrendName, TrendSet]):
-        time = _now_local()
-        data[TrendName.HUMIDITY].add_value(zone, Measurement(time, rh))
-        data[TrendName.TEMPERATURE].add_value(zone, Measurement(time, temp))
-        data[TrendName.PH].add_value(zone, Measurement(time, ph))
-        data[TrendName.ELECTRICAL_CONDUCTIVITY].add_value(zone, Measurement(time, ec))
-        data[TrendName.SALINITY].add_value(zone, Measurement(time, sal))
-        data[TrendName.TOTAL_DISSOLVED_SOLIDS].add_value(zone, Measurement(time, tds))
-        return data
-    trends_store.update(_upd)
+    """
+    Records environmental measurements such as relative humidity, temperature, pH level,
+    electrical conductivity, salinity, and total dissolved solids for a specified zone.
+    This function updates the respective trends for a given zone in the monitoring system.
+
+    :param zone: The identifier for the specific area being recorded.
+    :type zone: str
+    :param rh: The relative humidity value to be recorded in percent.
+    :type rh: float
+    :param temp: The temperature value to be recorded in degrees Celsius or Fahrenheit, depending on the unit configuration of the trend.
+    :type temp: float
+    :param ph: The pH level to be recorded.
+    :type ph: float
+    :param ec: The electrical conductivity value to be recorded in microsiemens per centimeter (μS/cm).
+    :type ec: int
+    :param sal: The salinity value to be recorded
+    :type sal: int
+    :param tds: The total dissolved solids value to be recorded
+    :type tds: int
+    :return: None
+    """
+    record_measurement(TrendName.HUMIDITY, zone, rh)
+    record_measurement(TrendName.TEMPERATURE, zone, temp)
+    record_measurement(TrendName.PH, zone, ph)
+    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, ec)
+    record_measurement(TrendName.SALINITY, zone, sal)
+    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, tds)
 
 def record_npk(zone: str, n: int, p: int, k: int):
-    def _upd(data: Dict[TrendName, TrendSet]):
-        time = _now_local()
-        data[TrendName.NITROGEN].add_value(zone, Measurement(time, n))
-        data[TrendName.PHOSPHORUS].add_value(zone, Measurement(time, p))
-        data[TrendName.POTASSIUM].add_value(zone, Measurement(time, k))
-        return data
-    trends_store.update(_upd)
+    """
+    Records nitrogen (N), phosphorus (P), and potassium (K) measurements for a specific zone.
 
-def record_water_liters(zone: str, liters: float):
-    record_measurement(TrendName.WATER, zone, liters)
+    This function handles the recording of nutrient measurements across different
+    zones. It leverages the `record_measurement` function to log data for nitrogen,
+    phosphorus, and potassium separately.
+
+    :param zone: The identification of the zone for which the measurements are recorded.
+    :type zone: str
+    :param n: The nitrogen value to be recorded.
+    :type n: int
+    :param p: The phosphorus value to be recorded.
+    :type p: int
+    :param k: The potassium value to be recorded.
+    :type k: int
+    :return: None
+    """
+    record_measurement(TrendName.NITROGEN, zone, n)
+    record_measurement(TrendName.PHOSPHORUS, zone, p)
+    record_measurement(TrendName.POTASSIUM, zone, k)
+
+def record_water_amount(zone: str, amount: float):
+    """
+    Records the amount of water for a specific zone. This function registers the water
+    measurement data into the system for further analysis or monitoring.
+
+    :param zone: The designated zone where the water measurement should be recorded.
+    :type zone: str
+    :param amount: The volume of water to be recorded in the specified zone. The unit of measurement is determined by
+        the unit configuration captured during `init_default_trends` or already present in the trend data,
+        `trends_store[TrendName.WATER].read().trend(zone).unit`
+    :type amount: float
+    :return: None
+    """
+    record_measurement(TrendName.WATER, zone, amount)

@@ -5,7 +5,22 @@ from gpiozero import OutputDevice
 from .model.zone import Zone
 from .dfrobot import SEN0604, SEN0605
 from .storage import TrendName
+from .config import CONFIG, Settings, Unit
 
+def convert_celsius_fahrenheit(celsius: float) -> float:
+    """
+    Converts a temperature value from Celsius to Fahrenheit.
+
+    This function takes a temperature in degrees Celsius and converts it to
+    its equivalent in degrees Fahrenheit using the formula
+    Fahrenheit = Celsius * (9/5) + 32.
+
+    :param celsius: Temperature value in degrees Celsius to be converted.
+    :type celsius: float
+    :return: The temperature value converted to degrees Fahrenheit.
+    :rtype: float
+    """
+    return celsius * 9/5 + 32
 
 class Patch:
     """
@@ -80,21 +95,31 @@ class Patch:
         """
         return self.relay_device.value
 
-    @water_state.setter
-    def water_state(self, on: bool) -> None:
+    def start_watering(self) -> None:
         """
-        Sets the water state of the relay device.
+        Starts the watering process by activating the water relay. This updates
+        the state of the relay device and logs the transition from its previous
+        state.
 
-        This method allows the adjustment of the relay device state
-        by enabling or disabling it. The state is logged for record-keeping
-        purposes based on the current status of the water zone.
-
-        :param on: Indicates whether the relay should be enabled (True) - water flow is on
-                   or disabled (False) - water flow is off.
-        :type on: bool
+        :raises Exception: If the relay device fails to update.
+        :return: None
         """
-        self.relay_device.value = on
-        self._logger.info(f"Water relay for zone {self.zone.name} set to {'ON' if on else 'OFF'}")
+        prev_state = "ON" if self.water_state else "OFF"
+        self.relay_device.value = True
+        self._logger.info(f"Water relay for zone {self.zone.name} turned 'ON' from '{prev_state}'")
+
+    def stop_watering(self) -> None:
+        """
+        Stops the watering process by deactivating the water relay. This updates
+        the state of the relay device and logs the transition from its previous
+        state.
+
+        :raises Exception: If the relay device fails to update.
+        :return: None
+        """
+        prev_state = "ON" if self.water_state else "OFF"
+        self.relay_device.value = False
+        self._logger.info(f"Water relay for zone {self.zone.name} turned 'OFF' from '{prev_state}'")
 
     @property
     def has_npk_sensor(self) -> bool:
@@ -255,8 +280,9 @@ class Patch:
         """
         readings: dict[TrendName, float|int|None] = {}
         if self.has_rh_sensor and self.rh_sensor.is_open:
+            metric:bool = CONFIG[Settings.UNITS] == Unit.METRIC
             rh_all = self.rh_sensor.read_all()
-            readings[TrendName.TEMPERATURE] = rh_all[0]
+            readings[TrendName.TEMPERATURE] = rh_all[0] if metric else convert_celsius_fahrenheit(rh_all[0])
             readings[TrendName.HUMIDITY] = rh_all[1]
             readings[TrendName.ELECTRICAL_CONDUCTIVITY] = rh_all[2]
             readings[TrendName.PH] = rh_all[3]

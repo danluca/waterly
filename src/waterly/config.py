@@ -40,8 +40,8 @@ LOG_DIR = f"{get_project_root()}/logs"
 
 # Zones and sensors IDs
 ZONES = {
-    1: Zone("Z1", "Zone 1", 0x0A, None, 16),
-    2: Zone("Z2", "Zone 2", 0x0B, 0x20, 19),
+    1: Zone("Z1", "Zone 1", 0x0A, None, 19),
+    2: Zone("Z2", "Zone 2", 0x0B, 0x20, 16),
     3: Zone("Z3", "Zone 3", 0x0C, None, 20),
 }
 #</editor-fold>
@@ -80,7 +80,7 @@ class Settings(StrEnum):
     WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours
     WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", None
     SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", 60*10            # 10 minutes
-    TREND_MAX_SAMPLES = "trend_max_samples", 52000                                  # ~ 1 year worth of samples
+    TREND_MAX_SAMPLES = "trend_max_samples", 3000                                  # ~ 1 month worth of samples
     LOCAL_TIMEZONE = "local_timezone", DEFAULT_TIMEZONE.zone
     LONGITUDE = "longitude", DEFAULT_LONGITUDE
     LATITUDE = "latitude", DEFAULT_LATITUDE
