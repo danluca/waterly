@@ -42,7 +42,7 @@ class PulseCounter:
         # Using gpiozero Button with pull_up=True matches the original FALLING-edge approach:
         # the sensor pulls the line low; when_pressed corresponds to the falling edge.
         self._button = Button(PULSE_GPIO_PIN, pull_up=True, bounce_time=0.005)
-        self._button.when_pressed = self._cb
+        self._button.when_released = self._cb
         self._started = True
         logging.getLogger(__name__).info(f"PulseCounter started on GPIO {PULSE_GPIO_PIN}")
 

@@ -46,7 +46,7 @@ ZONES = {
 }
 #</editor-fold>
 
-class Unit(StrEnum):
+class UnitType(StrEnum):
     """
     Represents a unit system for measurement.
 
@@ -76,7 +76,7 @@ class Settings(StrEnum):
     WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", 10
     LAST_WATERING_DATE = "last_watering_date", None
     RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 0.50   # 50%
-    UNITS = "units", Unit.IMPERIAL
+    UNITS = "units", UnitType.IMPERIAL
     WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours
     WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", None
     SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", 60*10            # 10 minutes

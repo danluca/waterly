@@ -5,7 +5,7 @@ from datetime import datetime, time as dtime
 from typing import Optional
 from gpiozero import CPUTemperature
 
-from .config import CONFIG, Settings, Unit
+from .config import CONFIG, Settings, UnitType
 from .patch import Patch, convert_celsius_fahrenheit
 from .pulses import PulseCounter
 from .storage import record_npk, record_rh, record_water_amount, record_rpi_temperature, TrendName
@@ -159,7 +159,7 @@ class WateringManager:
         :rtype: None
         """
         self._logger.info("Polling sensors for all zones")
-        metric:bool = CONFIG[Settings.UNITS] == Unit.METRIC
+        metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
         for patch in self.patches:
             try:
                 patch.open_sensor_bus()
@@ -201,7 +201,7 @@ class WateringManager:
         """
 
         self._logger.info("Starting watering cycle")
-        metric: bool = CONFIG[Settings.UNITS] == Unit.METRIC
+        metric: bool = CONFIG[Settings.UNITS] == UnitType.METRIC
         water_leak = self.pulses.read_and_reset(metric)
         if water_leak > 0:
             self._logger.warning(f"Water leakage detected between watering cycles: {water_leak:.2f} {'L' if metric else 'gal'}")
@@ -225,16 +225,17 @@ class WateringManager:
                     # Check humidity threshold
                     if moist is not None and moist >= target_humidity:
                         zone_done = True
-                        self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {moist:.2f}% above target {target_humidity:.2f}%")
+                        m,s = divmod((int(time.time()) - start_ts), 60)
+                        self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {moist:.2f}% above target {target_humidity:.2f}% after {m}:{s} min")
                 # Turn off the zone
                 patch.stop_watering()
-                self._logger.info(f"Watering zone {patch.zone.name} stopped at humidity level {patch.humidity():.2f}%")
                 stop_ts = int(time.time())
                 patch.close_sensor_bus()
                 # Compute water used during this zone
                 water_amount = self.pulses.read_and_reset(metric)
                 record_water_amount(patch.zone.name, water_amount)
-                self._logger.info(f"Zone {patch.zone.name} watered for {(stop_ts-start_ts)//60}:{(stop_ts-start_ts)%60}. Used ~{water_amount:.2f} {'L' if metric else 'gal'} of water")
+                m,s = divmod((stop_ts-start_ts), 60)
+                self._logger.info(f"Zone {patch.zone.name} watered for {m}:{s} min. Used ~{water_amount:.2f} {'L' if metric else 'gal'} of water and ended at humidity level {patch.humidity():.2f}%")
                 # Wait a bit before starting the next zone; allows the water valves to close properly before starting the next one
                 time.sleep(10)
         finally:

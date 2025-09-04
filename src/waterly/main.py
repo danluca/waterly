@@ -55,7 +55,7 @@ def main():
 
     try:
         while not stop:
-            time.sleep(0.5)
+            time.sleep(2)
     finally:
         logger.info("Shutting down...")
         manager.stop()

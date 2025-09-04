@@ -2,8 +2,8 @@ import os
 from datetime import datetime, UTC, tzinfo
 from typing import Any
 from enum import StrEnum
-from .config import DATA_DIR, CONFIG, Settings, ZONES, Unit
-from .model.trend import TrendSet, Measurement
+from .config import DATA_DIR, CONFIG, Settings, ZONES, UnitType
+from .model.trend import TrendSet, Measurement, convert_measurement
 from .json.serialization import ThreadSafeJSON
 
 def write_text_file(path: str, content: str) -> None:
@@ -139,7 +139,7 @@ def init_default_trends():
     if len(DEFAULT_TRENDS) > 0:
         return
 
-    metric:bool = CONFIG[Settings.UNITS] == Unit.METRIC
+    metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
     DEFAULT_TRENDS[TrendName.HUMIDITY] = TrendSet([z.name for z in ZONES.values()], TrendName.HUMIDITY, "%", CONFIG[Settings.TREND_MAX_SAMPLES])
     DEFAULT_TRENDS[TrendName.TEMPERATURE] = TrendSet([z.name for z in ZONES.values()], TrendName.TEMPERATURE, "°C" if metric else "°F", CONFIG[Settings.TREND_MAX_SAMPLES])
     DEFAULT_TRENDS[TrendName.PH] = TrendSet([z.name for z in ZONES.values()], TrendName.PH, "pH", CONFIG[Settings.TREND_MAX_SAMPLES])
@@ -183,7 +183,7 @@ def _now_local(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE]) -> datetime:
 def _now_local_str(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE], fmt: str = "%FT%T.%f%z%Z") -> str:
     return datetime.now(tz).strftime(fmt)
 
-def record_measurement(trend: TrendName, zone: str, value: float|int):
+def record_measurement(trend: TrendName, zone: str, value: float|int, cur_unit: str):
     """
     Records a measurement for a specific trend and zone with the given value.
 
@@ -200,7 +200,8 @@ def record_measurement(trend: TrendName, zone: str, value: float|int):
     :return: None
     """
     def _upd(data: TrendSet):
-        data.add_value(zone, Measurement(_now_local(), value))
+        new_unit = data.trend(zone).unit
+        data.add_value(zone, Measurement(_now_local(), convert_measurement(value, cur_unit, new_unit)))
         return data
     trends_store[trend].update(_upd)
 
@@ -217,7 +218,7 @@ def record_humidity(zone: str, value: float):
     :type value: float
     :return: None
     """
-    record_measurement(TrendName.HUMIDITY, zone, value)
+    record_measurement(TrendName.HUMIDITY, zone, value, DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit)
 
 def record_temperature(zone: str, value: float):
     """
@@ -230,7 +231,8 @@ def record_temperature(zone: str, value: float):
     :type value: float
     :return: None
     """
-    record_measurement(TrendName.TEMPERATURE, zone, value)
+    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
+    record_measurement(TrendName.TEMPERATURE, zone, value, "°C" if metric else "°F")
 
 def record_electrical_conductivity(zone: str, value: int):
     """
@@ -245,7 +247,7 @@ def record_electrical_conductivity(zone: str, value: int):
     :type value: int
     :return: None
     """
-    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, value)
+    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, value, DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit)
 
 def record_total_dissolved_solids(zone: str, value: int):
     """
@@ -258,7 +260,7 @@ def record_total_dissolved_solids(zone: str, value: int):
     :param value: The measured value of total dissolved solids to be recorded.
     :type value: int
     """
-    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, value)
+    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, value, DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit)
 
 def record_ph(zone: str, value: float):
     """
@@ -270,7 +272,7 @@ def record_ph(zone: str, value: float):
     :type value: float
     :return: None
     """
-    record_measurement(TrendName.PH, zone, value)
+    record_measurement(TrendName.PH, zone, value, DEFAULT_TRENDS[TrendName.PH].trend(zone).unit)
 
 def record_salinity(zone: str, value: int):
     """
@@ -282,7 +284,7 @@ def record_salinity(zone: str, value: int):
     :type value: int
     :return: None
     """
-    record_measurement(TrendName.SALINITY, zone, value)
+    record_measurement(TrendName.SALINITY, zone, value, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit)
 
 def record_rpi_temperature(value: float):
     """
@@ -293,7 +295,8 @@ def record_rpi_temperature(value: float):
     :param value: The temperature value of the Raspberry Pi board to record in the unit configured for the trend.
     :type value: float
     """
-    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, value)      # the RPI board temperature is not zone-specific; using always zone 1
+    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
+    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, value, "°C" if metric else "°F")      # the RPI board temperature is not zone-specific; using always zone 1
 
 def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, tds: int):
     """
@@ -317,12 +320,13 @@ def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, t
     :type tds: int
     :return: None
     """
-    record_measurement(TrendName.HUMIDITY, zone, rh)
-    record_measurement(TrendName.TEMPERATURE, zone, temp)
-    record_measurement(TrendName.PH, zone, ph)
-    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, ec)
-    record_measurement(TrendName.SALINITY, zone, sal)
-    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, tds)
+    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
+    record_measurement(TrendName.HUMIDITY, zone, rh, DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit)
+    record_measurement(TrendName.TEMPERATURE, zone, temp, "°C" if metric else "°F")
+    record_measurement(TrendName.PH, zone, ph, DEFAULT_TRENDS[TrendName.PH].trend(zone).unit)
+    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, ec, DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit)
+    record_measurement(TrendName.SALINITY, zone, sal, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit)
+    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, tds, DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit)
 
 def record_npk(zone: str, n: int, p: int, k: int):
     """
@@ -342,9 +346,9 @@ def record_npk(zone: str, n: int, p: int, k: int):
     :type k: int
     :return: None
     """
-    record_measurement(TrendName.NITROGEN, zone, n)
-    record_measurement(TrendName.PHOSPHORUS, zone, p)
-    record_measurement(TrendName.POTASSIUM, zone, k)
+    record_measurement(TrendName.NITROGEN, zone, n, DEFAULT_TRENDS[TrendName.NITROGEN].trend(zone).unit)
+    record_measurement(TrendName.PHOSPHORUS, zone, p, DEFAULT_TRENDS[TrendName.PHOSPHORUS].trend(zone).unit)
+    record_measurement(TrendName.POTASSIUM, zone, k, DEFAULT_TRENDS[TrendName.POTASSIUM].trend(zone).unit)
 
 def record_water_amount(zone: str, amount: float):
     """
@@ -359,4 +363,5 @@ def record_water_amount(zone: str, amount: float):
     :type amount: float
     :return: None
     """
-    record_measurement(TrendName.WATER, zone, amount)
+    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
+    record_measurement(TrendName.WATER, zone, amount, "L" if metric else "gal")

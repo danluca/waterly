@@ -5,7 +5,7 @@ from gpiozero import OutputDevice
 from .model.zone import Zone
 from .dfrobot import SEN0604, SEN0605
 from .storage import TrendName
-from .config import CONFIG, Settings, Unit
+from .config import CONFIG, Settings, UnitType
 
 def convert_celsius_fahrenheit(celsius: float) -> float:
     """
@@ -106,7 +106,10 @@ class Patch:
         """
         prev_state = "ON" if self.water_state else "OFF"
         self.relay_device.value = True
-        self._logger.info(f"Water relay for zone {self.zone.name} turned 'ON' from '{prev_state}'")
+        if prev_state == "OFF":
+            self._logger.info(f"Water relay for zone {self.zone.name} turned 'ON' from '{prev_state}'")
+        else:
+            self._logger.info(f"Water relay for zone {self.zone.name} remains 'ON'")
 
     def stop_watering(self) -> None:
         """
@@ -119,7 +122,10 @@ class Patch:
         """
         prev_state = "ON" if self.water_state else "OFF"
         self.relay_device.value = False
-        self._logger.info(f"Water relay for zone {self.zone.name} turned 'OFF' from '{prev_state}'")
+        if prev_state == "ON":
+            self._logger.info(f"Water relay for zone {self.zone.name} turned 'OFF' from '{prev_state}'")
+        else:
+            self._logger.info(f"Water relay for zone {self.zone.name} remains 'OFF'")
 
     @property
     def has_npk_sensor(self) -> bool:
@@ -280,7 +286,7 @@ class Patch:
         """
         readings: dict[TrendName, float|int|None] = {}
         if self.has_rh_sensor and self.rh_sensor.is_open:
-            metric:bool = CONFIG[Settings.UNITS] == Unit.METRIC
+            metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
             rh_all = self.rh_sensor.read_all()
             readings[TrendName.TEMPERATURE] = rh_all[0] if metric else convert_celsius_fahrenheit(rh_all[0])
             readings[TrendName.HUMIDITY] = rh_all[1]

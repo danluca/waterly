@@ -1,5 +1,37 @@
 from datetime import datetime
 
+def convert_measurement(value: float|int|None, current_unit: str, new_unit: str) -> float|int|None:
+    """
+    Convert values between different measurement units.
+
+    This function is designed to convert specified values from one unit to another.
+    It supports conversions between Celsius and Fahrenheit, and between liters and gallons.
+    If the current unit is already the same as the new unit, the original value is
+    returned. If the provided value is None, the function returns None.
+
+    :param value: The numeric value to be converted. Can be an integer, float or None.
+    :type value: float | int | None
+    :param current_unit: The current measurement unit of the value.
+    :type current_unit: str
+    :param new_unit: The desired measurement unit to convert to.
+    :type new_unit: str
+    :return: The converted value as an integer or float, or None if the input value is None.
+    :rtype: float | int | None
+    """
+    if current_unit == new_unit:
+        return value
+    if value is None:
+        return None
+    match current_unit, new_unit:
+        case "°C", "°F":
+            return value * 9/5 + 32
+        case "°F", "°C":
+            return (value - 32) * 5 / 9
+        case "L", "gal":
+            return value / 3.785411784
+        case "gal", "L":
+            return value * 3.785411784
+    return value
 
 class Measurement:
     """

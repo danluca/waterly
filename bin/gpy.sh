@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 cd ~/code
 source ./pycenvs/gpy/bin/activate
-cd  ./gpy
+cd  ./gpy/bin
 waterly
 deactivate
 
