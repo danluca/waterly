@@ -1,124 +1,4 @@
-from datetime import datetime
-
-def convert_measurement(value: float|int|None, current_unit: str, new_unit: str) -> float|int|None:
-    """
-    Convert values between different measurement units.
-
-    This function is designed to convert specified values from one unit to another.
-    It supports conversions between Celsius and Fahrenheit, and between liters and gallons.
-    If the current unit is already the same as the new unit, the original value is
-    returned. If the provided value is None, the function returns None.
-
-    :param value: The numeric value to be converted. Can be an integer, float or None.
-    :type value: float | int | None
-    :param current_unit: The current measurement unit of the value.
-    :type current_unit: str
-    :param new_unit: The desired measurement unit to convert to.
-    :type new_unit: str
-    :return: The converted value as an integer or float, or None if the input value is None.
-    :rtype: float | int | None
-    """
-    if current_unit == new_unit:
-        return value
-    if value is None:
-        return None
-    match current_unit, new_unit:
-        case "°C", "°F":
-            return value * 9/5 + 32
-        case "°F", "°C":
-            return (value - 32) * 5 / 9
-        case "L", "gal":
-            return value / 3.785411784
-        case "gal", "L":
-            return value * 3.785411784
-    return value
-
-class Measurement:
-    """
-    Represents a measurement with a timestamp and a value.
-
-    The Measurement class is designed to store a single measurement
-    event, including the time it was recorded and the associated value.
-    It provides methods for retrieving timestamped data as well as an
-    intuitive string representation.
-
-    :ivar time: The datetime when the measurement was recorded.
-    :type time: datetime
-    :ivar value: The numerical value of the measurement, can be a float, int, or None if no value is assigned.
-    :type value: float | int | None
-    """
-    def __init__(self, time: datetime, value: float|int|None):
-        self.time: datetime = time
-        self.data: float|int|None = value
-
-    @property
-    def time_iso(self) -> str:
-        """
-        Converts the stored time to its ISO 8601 string representation.
-
-        This method provides a standardized string format for the stored
-        datetime object, which represents the timestamp in ISO 8601 format.
-
-        :return: A string representation of the timestamp in ISO 8601 format.
-        :rtype: str
-        """
-        return self.time.isoformat()
-
-    @property
-    def value(self) -> float|int|None:
-        """
-        Retrieves the value stored in the object.
-
-        This method returns the value associated with the instance. The returned value
-        can be of type float, int, or None depending on the state of the object.
-
-        :return: The current value associated with the instance.
-        :rtype: float | int | None
-        """
-        return self.data
-
-    @property
-    def timestamp(self) -> datetime:
-        """
-        Returns the time associated with the instance.
-
-        This method retrieves a `datetime` object indicating the specific time
-        of the instance's operation. It is useful in accessing temporal
-        attributes tied to the instance.
-
-        :return: The time associated with the instance
-        :rtype: datetime
-        """
-        return self.time
-
-    def json_encode(self):
-        return {
-            "__type__": "Measurement",
-            "time": self.time,
-            "value": self.data
-        }
-
-    @staticmethod
-    def json_decode(obj):
-        if "__type__" in obj and obj["__type__"] == "Measurement":
-            time = obj.get("time")
-            value = obj.get("value")
-            return Measurement(time, value)
-        return None
-
-    def __str__(self) -> str:
-        """
-        Returns a string representation of the object.
-
-        The string format includes the timestamp followed by the value
-        of the object. This method defines how the object is represented
-        as a string when passed to functions like `str()`.
-
-        :return: A string that contains the timestamp and value separated
-                 by a colon.
-        :rtype: str
-        """
-        return f"{{{self.time}: {self.data}}}"
+from .measurement import Measurement, convert_measurement
 
 class Trend:
     """
@@ -241,6 +121,8 @@ class Trend:
             data = obj.get("data")
             t = Trend(name, unit, max_samples)
             t.data = data
+            for d in t.data:
+                d._unit = unit
             return t
         return None
 

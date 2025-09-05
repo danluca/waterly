@@ -3,6 +3,7 @@ from datetime import datetime, UTC, tzinfo
 from typing import Any
 from enum import StrEnum
 from .config import DATA_DIR, CONFIG, Settings, ZONES, UnitType
+from .model.measurement import WateringMeasurement
 from .model.trend import TrendSet, Measurement, convert_measurement
 from .json.serialization import ThreadSafeJSON
 
@@ -183,7 +184,7 @@ def _now_local(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE]) -> datetime:
 def _now_local_str(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE], fmt: str = "%FT%T.%f%z%Z") -> str:
     return datetime.now(tz).strftime(fmt)
 
-def record_measurement(trend: TrendName, zone: str, value: float|int, cur_unit: str):
+def record_measurement(trend: TrendName, zone: str, measurement: Measurement):
     """
     Records a measurement for a specific trend and zone with the given value.
 
@@ -195,13 +196,13 @@ def record_measurement(trend: TrendName, zone: str, value: float|int, cur_unit: 
     :type trend: TrendName
     :param zone: The identifier for the zone
     :type zone: str
-    :param value: The measurement value to record. Can be a float or an integer.
-    :type value: float | int
+    :param measurement: The measurement to be recorded.
+    :type measurement: Measurement
     :return: None
     """
     def _upd(data: TrendSet):
         new_unit = data.trend(zone).unit
-        data.add_value(zone, Measurement(_now_local(), convert_measurement(value, cur_unit, new_unit)))
+        data.add_value(zone, measurement.convert(new_unit))
         return data
     trends_store[trend].update(_upd)
 
@@ -218,7 +219,7 @@ def record_humidity(zone: str, value: float):
     :type value: float
     :return: None
     """
-    record_measurement(TrendName.HUMIDITY, zone, value, DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit)
+    record_measurement(TrendName.HUMIDITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit))
 
 def record_temperature(zone: str, value: float):
     """
@@ -231,8 +232,8 @@ def record_temperature(zone: str, value: float):
     :type value: float
     :return: None
     """
-    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
-    record_measurement(TrendName.TEMPERATURE, zone, value, "°C" if metric else "°F")
+    unit = "°C" if CONFIG[Settings.UNITS] == UnitType.METRIC else "°F"
+    record_measurement(TrendName.TEMPERATURE, zone, Measurement(_now_local(), value, unit))
 
 def record_electrical_conductivity(zone: str, value: int):
     """
@@ -247,7 +248,7 @@ def record_electrical_conductivity(zone: str, value: int):
     :type value: int
     :return: None
     """
-    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, value, DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit)
+    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit))
 
 def record_total_dissolved_solids(zone: str, value: int):
     """
@@ -260,7 +261,7 @@ def record_total_dissolved_solids(zone: str, value: int):
     :param value: The measured value of total dissolved solids to be recorded.
     :type value: int
     """
-    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, value, DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit)
+    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit))
 
 def record_ph(zone: str, value: float):
     """
@@ -272,7 +273,7 @@ def record_ph(zone: str, value: float):
     :type value: float
     :return: None
     """
-    record_measurement(TrendName.PH, zone, value, DEFAULT_TRENDS[TrendName.PH].trend(zone).unit)
+    record_measurement(TrendName.PH, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.PH].trend(zone).unit))
 
 def record_salinity(zone: str, value: int):
     """
@@ -284,7 +285,7 @@ def record_salinity(zone: str, value: int):
     :type value: int
     :return: None
     """
-    record_measurement(TrendName.SALINITY, zone, value, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit)
+    record_measurement(TrendName.SALINITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit))
 
 def record_rpi_temperature(value: float):
     """
@@ -295,8 +296,8 @@ def record_rpi_temperature(value: float):
     :param value: The temperature value of the Raspberry Pi board to record in the unit configured for the trend.
     :type value: float
     """
-    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
-    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, value, "°C" if metric else "°F")      # the RPI board temperature is not zone-specific; using always zone 1
+    unit = "°C" if CONFIG[Settings.UNITS] == UnitType.METRIC else "°F"
+    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, Measurement(_now_local(), value, unit))      # the RPI board temperature is not zone-specific; using always zone 1
 
 def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, tds: int):
     """
@@ -321,12 +322,28 @@ def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, t
     :return: None
     """
     metric = CONFIG[Settings.UNITS] == UnitType.METRIC
-    record_measurement(TrendName.HUMIDITY, zone, rh, DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit)
-    record_measurement(TrendName.TEMPERATURE, zone, temp, "°C" if metric else "°F")
-    record_measurement(TrendName.PH, zone, ph, DEFAULT_TRENDS[TrendName.PH].trend(zone).unit)
-    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, ec, DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit)
-    record_measurement(TrendName.SALINITY, zone, sal, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit)
-    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, tds, DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit)
+    # Create a dictionary to store trend and unit mappings to reduce repetitive lookups
+    trend_units = {
+        TrendName.HUMIDITY: DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit,
+        TrendName.TEMPERATURE: "°C" if metric else "°F",
+        TrendName.PH: DEFAULT_TRENDS[TrendName.PH].trend(zone).unit,
+        TrendName.ELECTRICAL_CONDUCTIVITY: DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit,
+        TrendName.SALINITY: DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit,
+        TrendName.TOTAL_DISSOLVED_SOLIDS: DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit
+    }
+    # Batch record measurements using a list of tuples
+    measurements = [
+        (TrendName.HUMIDITY, rh),
+        (TrendName.TEMPERATURE, temp),
+        (TrendName.PH, ph),
+        (TrendName.ELECTRICAL_CONDUCTIVITY, ec),
+        (TrendName.SALINITY, sal),
+        (TrendName.TOTAL_DISSOLVED_SOLIDS, tds)
+    ]
+    # Record all measurements in a single loop
+    tstamp = _now_local()
+    for trend_name, value in measurements:
+        record_measurement(trend_name, zone, Measurement(tstamp, value, trend_units[trend_name]))
 
 def record_npk(zone: str, n: int, p: int, k: int):
     """
@@ -346,22 +363,20 @@ def record_npk(zone: str, n: int, p: int, k: int):
     :type k: int
     :return: None
     """
-    record_measurement(TrendName.NITROGEN, zone, n, DEFAULT_TRENDS[TrendName.NITROGEN].trend(zone).unit)
-    record_measurement(TrendName.PHOSPHORUS, zone, p, DEFAULT_TRENDS[TrendName.PHOSPHORUS].trend(zone).unit)
-    record_measurement(TrendName.POTASSIUM, zone, k, DEFAULT_TRENDS[TrendName.POTASSIUM].trend(zone).unit)
+    tstamp = _now_local()
+    record_measurement(TrendName.NITROGEN, zone, Measurement(tstamp, n, DEFAULT_TRENDS[TrendName.NITROGEN].trend(zone).unit))
+    record_measurement(TrendName.PHOSPHORUS, zone, Measurement(tstamp, p, DEFAULT_TRENDS[TrendName.PHOSPHORUS].trend(zone).unit))
+    record_measurement(TrendName.POTASSIUM, zone, Measurement(tstamp, k, DEFAULT_TRENDS[TrendName.POTASSIUM].trend(zone).unit))
 
-def record_water_amount(zone: str, amount: float):
+def record_watering(zone: str, measurement: WateringMeasurement):
     """
     Records the amount of water for a specific zone. This function registers the water
     measurement data into the system for further analysis or monitoring.
 
     :param zone: The designated zone where the water measurement should be recorded.
     :type zone: str
-    :param amount: The volume of water to be recorded in the specified zone. The unit of measurement is determined by
-        the unit configuration captured during `init_default_trends` or already present in the trend data,
-        `trends_store[TrendName.WATER].read().trend(zone).unit`
-    :type amount: float
+    :param measurement: The water measurement to be recorded.
+    :type measurement: WateringMeasurement
     :return: None
     """
-    metric = CONFIG[Settings.UNITS] == UnitType.METRIC
-    record_measurement(TrendName.WATER, zone, amount, "L" if metric else "gal")
+    record_measurement(TrendName.WATER, zone, measurement)

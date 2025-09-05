@@ -20,9 +20,8 @@ class WeatherService:
     the last update. The service is built to operate in a daemon thread, running until
     explicitly stopped.
 
-    :ivar _next_12h_rain_prob: The probability of rain for the next 12 hours, as a floating-point value [0.0-1.0].
-        Negative if no data is available.
-    :type _next_12h_rain_prob: float
+    :ivar _next_24h_rain_prob: The probability of rain for the next 24 hours, as a floating-point value [0.0-1.0].
+    :type _next_24h_rain_prob: list[tuple[datetime, float]]
     :ivar _forecast_days: The number of forecast days requested from the weather API. Hardcoded as 3 for now.
     :type _forecast_days: int
     :ivar _timezone: The timezone of the weather data, determined from the API response or set to a default.
@@ -32,10 +31,10 @@ class WeatherService:
     """
     def __init__(self):
         self._lock = threading.RLock()
-        self._next_12h_rain_prob: float = -1.0
+        self._next_24h_rain_prob: list[tuple[datetime, float]] = []
         self._forecast_days: int = 3    # hardcoded for now using a common sense value
         self._timezone: pytz.BaseTzInfo = CONFIG[Settings.LOCAL_TIMEZONE]
-        self._last_update: Optional[datetime] = None
+        self._last_update: Optional[datetime] = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="WeatherService", daemon=True)
         self._logger = logging.getLogger(__name__)
@@ -49,6 +48,7 @@ class WeatherService:
         in a separate execution flow.
 
         """
+        # TODO: read last saved weather data, if any
         self._thread.start()
 
     def stop(self):
@@ -71,11 +71,23 @@ class WeatherService:
         hours. The value is obtained while ensuring thread safety, preventing
         access collisions when used in concurrent environments.
 
-        :return: The probability of rain for the next 12 hours as a float value [0.0-1.0].
+        :return: The probability of rain for the next 12 hours as a float value in range [0.0-1.0].
         :rtype: float
         """
         with self._lock:
-            return self._next_12h_rain_prob
+            if not self._last_update or not self._next_24h_rain_prob:
+                return 0.0
+
+            now = datetime.now(self._timezone)
+            limit_12h = now + timedelta(hours=12)
+            # this should never happen, but just in case
+            if (now - self._last_update) > timedelta(hours=24):
+                self._update_weather()  # we're using a re-entrant lock so this is safe
+
+            # Get probabilities only for future 12h time periods
+            future_probs = [p for t, p in self._next_24h_rain_prob if ((t - now).total_seconds() > 0 and t <= limit_12h)]
+            # we should have at least 6 future hours of forecast data for this to be reliable
+            return max(future_probs, default=0.0) if len(future_probs) > 6 else 0.0
 
     def get_last_update(self) -> Optional[datetime]:
         """
@@ -181,8 +193,8 @@ class WeatherService:
             self._logger.warning(f"Invalid timezone '{data.get('timezone', 'UTC')}' for pytz/TZDB version {pytz.VERSION}. Using default timezone {DEFAULT_TIMEZONE} instead.")
 
         now = datetime.now(self._timezone)
-        horizon = now + timedelta(hours=12)
-        next_12 = []
+        horizon = now + timedelta(hours=24)
+        next_24: list[tuple[datetime, float]] = []
         for t, p in zip(times, probs):
             # noinspection PyBroadException
             try:
@@ -190,10 +202,10 @@ class WeatherService:
             except Exception:
                 continue
             if now <= ts <= horizon:
-                next_12.append((ts, p / 100.0))
-        prob = max((p for _, p in next_12), default=0.0)
+                next_24.append((ts, p / 100.0))
+        prob = max((p for _, p in next_24[0:12]), default=0.0)
         with self._lock:
-            self._next_12h_rain_prob = prob
+            self._next_24h_rain_prob = next_24
             self._last_update = now
         CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP] = now
         self._logger.info(f"Weather updated. Next 12h rain probability: {prob*100:.2f}%")

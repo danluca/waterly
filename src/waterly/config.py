@@ -24,10 +24,11 @@ def get_project_root():
 # local timezone of the system - updated by the weather service
 DEFAULT_TIMEZONE: pytz.BaseTzInfo = pytz.UTC
 
-# Location for weather (set to your coordinates) - see https://www.google.com/maps/place/45%C2%B001'54.0%22N+93%C2%B027'00.9%22W/@45.031667,-93.4528303,17z/data=!3m1!4b1!4m4!3m3!8m2!3d45.031667!4d-93.45025?entry=ttu&g_ep=EgoyMDI1MDgxOS4wIKXMDSoASAFQAw%3D%3D
-# Plus code: 2GJX+MW6 Plymouth, Minnesota
-DEFAULT_LATITUDE = 45.031667
-DEFAULT_LONGITUDE = -93.450250
+# Default location for weather (set to your coordinates, unless you happen to have a garden in the middle of the ocean, off west coast of Africa ;))
+# - use https://www.google.com/maps and copy your coordinates
+# E.g., Plus code: 2GJX+MW6 Plymouth, Minnesota
+DEFAULT_LATITUDE = 0.0
+DEFAULT_LONGITUDE = 0.0
 
 # Pulse counter (GPIO)
 PULSE_GPIO_PIN = 21

@@ -4,6 +4,7 @@ import threading
 
 from enum import Enum
 from typing import Any
+from datetime import datetime
 from .times import _json_datetime_encoder, _json_datetime_decoder
 from ..model.trend import *     # needed to have available all model objects in the global scope
 
