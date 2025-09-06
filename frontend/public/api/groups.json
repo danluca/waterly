@@ -1,0 +1,7 @@
+{
+  "items": [
+    { "sensor_id": "temp-001", "metric": "temperature", "value": 22.6, "unit": "C", "timestamp": "2025-09-05T17:30:12Z", "site": "lab-A" },
+    { "sensor_id": "hum-003", "metric": "humidity", "value": 44.9, "unit": "%", "timestamp": "2025-09-05T17:30:00Z", "site": "lab-B" },
+    { "sensor_id": "ph-002", "metric": "ph", "value": 7.10, "unit": "pH", "timestamp": "2025-09-05T17:29:55Z", "site": "tank-2" }
+  ]
+}

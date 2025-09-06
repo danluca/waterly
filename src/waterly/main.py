@@ -1,4 +1,5 @@
 import signal
+import sys
 import time
 import logging
 
@@ -11,10 +12,14 @@ from .weather import WeatherService
 from .log import init_logging
 from .web import create_app, run_app
 
+def uncaught_exception_handler(exc_type, exc_value, exc_traceback):
+    logging.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
 
 def main():
     init_logging()
     logger = logging.getLogger("main")
+    sys.excepthook = uncaught_exception_handler
 
     logger.info("Starting application...")
     # Storage

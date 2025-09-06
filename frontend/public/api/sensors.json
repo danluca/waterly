@@ -1,0 +1,29 @@
+{
+  "sensor_id": "env-001",
+  "site": "greenhouse-3",
+  "time": "Sep 06, 17:30 CDT",
+  "location": { "lat": 30.2666, "lon": -97.7333 },
+  "measurements": [
+    { "name": "temperature",
+      "values": [22.6, 24.0, 23.5],
+      "times": ["17:30", "14:45", "18:00"],
+      "latestValue": 23.5,
+      "unit": "C",
+      "group": "Zone A"
+    },
+    { "name": "humidity",
+      "values": [45.2, 47.3, 51.2],
+      "times": ["17:30", "14:45", "18:00"],
+      "latestValue": 51.2,
+      "unit": "%",
+      "group": "Zone A"
+    },
+    { "name": "ph",
+      "values": [6.82, 6.45, 6.96],
+      "times": ["17:30", "14:45", "18:00"],
+      "latestValue": 6.96,
+      "unit": "pH",
+      "group": "Zone B"
+    }
+  ]
+}

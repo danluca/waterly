@@ -287,17 +287,16 @@ def record_salinity(zone: str, value: int):
     """
     record_measurement(TrendName.SALINITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit))
 
-def record_rpi_temperature(value: float):
+def record_rpi_temperature(value: Measurement):
     """
     Records the temperature measurement of the Raspberry Pi board. This function assigns
     the measurement to a specific trend and a default zone specific to the Raspberry Pi
     temperature context.
 
     :param value: The temperature value of the Raspberry Pi board to record in the unit configured for the trend.
-    :type value: float
+    :type value: Measurement
     """
-    unit = "°C" if CONFIG[Settings.UNITS] == UnitType.METRIC else "°F"
-    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, Measurement(_now_local(), value, unit))      # the RPI board temperature is not zone-specific; using always zone 1
+    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, value)      # the RPI board temperature is not zone-specific; using always zone 1
 
 def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, tds: int):
     """

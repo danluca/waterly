@@ -6,7 +6,7 @@ from typing import Optional
 from gpiozero import CPUTemperature
 
 from .config import CONFIG, Settings, UnitType
-from .model.measurement import WateringMeasurement
+from .model.measurement import WateringMeasurement, Measurement
 from .patch import Patch, convert_celsius_fahrenheit
 from .pulses import PulseCounter
 from .storage import record_npk, record_rh, record_watering, record_rpi_temperature, TrendName
@@ -145,6 +145,7 @@ class WateringManager:
                         CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         self._last_watering_date = today_key
                     else:
+                        self._logger.info(f"Rain forecast at {rain_prob*100:.2f}% < {self._rain_thr*100:.2f}% enables watering with target humidity {self._rh_target}%")
                         self._perform_watering(self._rh_target, self._max_minutes)
                         CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         self._last_watering_date = today_key
@@ -172,6 +173,7 @@ class WateringManager:
                               sensor_readings[TrendName.PH], sensor_readings[TrendName.ELECTRICAL_CONDUCTIVITY],
                               sensor_readings[TrendName.SALINITY], sensor_readings[TrendName.TOTAL_DISSOLVED_SOLIDS])
                     self._logger.info(f"RHTemp sensor {patch.rh_sensor.device_addr:#02X} readings for zone {patch.zone.name} have been recorded")
+                    self._logger.info(f"RHTemp at zone {patch.zone.name}: {sensor_readings[TrendName.HUMIDITY]:.2f}% @ {sensor_readings[TrendName.TEMPERATURE]:.2f}°{'C' if metric else 'F'}")
                 if sensor_readings.get(TrendName.NITROGEN) is not None:
                     record_npk(patch.zone.name, sensor_readings[TrendName.NITROGEN], sensor_readings[TrendName.PHOSPHORUS],
                                sensor_readings[TrendName.POTASSIUM])
@@ -181,8 +183,8 @@ class WateringManager:
             except Exception as e:
                 self._logger.error(f"Sensors reading failed for zone {patch.zone.name}: {e}", exc_info=True)
         self.patches[0].close_sensor_bus()      # leverages the first patch to close the bus, sensors are all on same bus
-        rpi_temp = CPUTemperature().temperature
-        record_rpi_temperature(rpi_temp if metric else convert_celsius_fahrenheit(rpi_temp))
+        rpi_temp = Measurement(datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]), CPUTemperature().temperature, "°C")
+        record_rpi_temperature(rpi_temp)
         self._logger.info("Sensors polling finished")
 
     def _perform_watering(self, target_humidity: float, max_minutes_per_zone: int):
@@ -230,7 +232,7 @@ class WateringManager:
                     if moist is not None and moist >= target_humidity:
                         zone_done = True
                         m,s = divmod((int(time.time()) - start_ts), 60)
-                        self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {moist:.2f}% above target {target_humidity:.2f}% after {m}:{s} min")
+                        self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {moist:.2f}% above target {target_humidity:.2f}% after {m:02d}:{s:02d} min")
                 # Turn off the zone
                 patch.stop_watering()
                 stop_ts = int(time.time())
@@ -243,7 +245,7 @@ class WateringManager:
                 msmt = WateringMeasurement(cur_local_time, water_amount, "L" if metric else "gal", humid_start, humid_stop, stop_ts-start_ts)
                 record_watering(patch.zone.name, msmt)
                 m,s = divmod((stop_ts-start_ts), 60)
-                self._logger.info(f"Zone {patch.zone.name} watered for {m}:{s} min. Used ~{water_amount:.2f} {'L' if metric else 'gal'} of water and ended at humidity level {humid_stop:.2f}%")
+                self._logger.info(f"Zone {patch.zone.name} watered for {m:02d}:{s:02d} min. Used ~{water_amount:.2f} {'L' if metric else 'gal'} of water and ended at humidity level {humid_stop:.2f}%")
                 # Wait a bit before starting the next zone; allows the water valves to close properly before starting the next one
                 time.sleep(10)
         finally:
