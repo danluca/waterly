@@ -1,3 +1,8 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 # python
 """
 DFRobot SEN0604 RS485 Soil Sensor (Temperature, Moisture, EC, pH) Modbus-RTU library.
@@ -19,7 +24,8 @@ Some firmware maps expose data in Input Registers (0x04), others in Holding (0x0
 This driver first tries Input Registers then falls back to Holding for robustness.
 """
 
-from typing import Tuple
+from time import sleep
+from enum import Enum
 from .base_sensor import BaseRS485ModbusSensor, RS485_PORT
 
 
@@ -36,11 +42,11 @@ class SEN0604(BaseRS485ModbusSensor):
         >>> sensor = SEN0604(port="/dev/ttyUSB0")  # Create sensor instance
         >>> try:
         >>>     # Read all sensor values at once
-        >>>     temp, moisture, ec, ph = sensor.read_all()
-        >>>     print(f"Temperature: {temp:.1f} °C")
-        >>>     print(f"Moisture: {moisture:.1f} %")
-        >>>     print(f"EC: {ec} µS/cm") 
-        >>>     print(f"pH: {ph:.2f}")
+        >>>     r = sensor.read_all()
+        >>>     print(f"Temperature: {r[SEN0604.ReadingType.TEMPERATURE]:.1f} °C")
+        >>>     print(f"Moisture: {r[SEN0604.ReadingType.MOISTURE]:.1f} %")
+        >>>     print(f"EC: {r[SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY]} µS/cm")
+        >>>     print(f"pH: {r[SEN0604.ReadingType.PH]:.2f}")
         >>>
         >>>     # Or read individual values
         >>>     temp_c = sensor.read_temperature_c()
@@ -94,6 +100,14 @@ class SEN0604(BaseRS485ModbusSensor):
     REG_MOISTURE_CALIBRATION = 0x0051   # Water content calibration value; Integer (expanded 10 times)
     REG_EC_CALIBRATION = 0x0052         # Conductivity calibration value; integer
     REG_PH_CALIBRATION = 0x0053         # pH calibration value; integer
+
+    class ReadingType(Enum):
+        TEMPERATURE="temperature"
+        MOISTURE="moisture"
+        ELECTRICAL_CONDUCTIVITY="ec"
+        PH="ph"
+        SALINITY="salinity"
+        TOTAL_DISSOLVED_SOLIDS="tds"
 
     def __init__(self, deviceaddr: int = BaseRS485ModbusSensor.DEFAULT_DEVICE_ADDR, port: str = RS485_PORT,
                  baudrate: int = BaseRS485ModbusSensor.DEFAULT_BAUD, timeout: float = BaseRS485ModbusSensor.DEFAULT_TIMEOUT_S,
@@ -199,18 +213,24 @@ class SEN0604(BaseRS485ModbusSensor):
         raw = self._read_one(self.REG_TDS)
         return int(raw)
 
-    def read_all(self) -> Tuple[float, float, int, float]:
+    def read_all(self) -> dict[ReadingType, float|int]:
         """
         Returns (temperature_c, moisture_percent, ec_uScm, ph)
         """
-        regs = [self.REG_TEMPERATURE, self.REG_MOISTURE, self.REG_EC, self.REG_PH]
+        regs = [self.REG_MOISTURE, self.REG_TEMPERATURE, self.REG_EC, self.REG_PH]
         values = self._read_many(regs)
-
-        temp_c = round(values[self.REG_TEMPERATURE] / 10.0, 1)
-        moist_pct = round(values[self.REG_MOISTURE] / 10.0, 1)
-        ec_val = int(values[self.REG_EC])
-        ph_val = round(values[self.REG_PH] / 10.0, 1)
-        return temp_c, moist_pct, ec_val, ph_val
+        result = {
+            SEN0604.ReadingType.MOISTURE: round(values[self.REG_MOISTURE] / 10.0, 1),
+            SEN0604.ReadingType.TEMPERATURE: round(values[self.REG_TEMPERATURE] / 10.0, 1),
+            SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY: int(values[self.REG_EC]),
+            SEN0604.ReadingType.PH: round(values[self.REG_PH] / 10.0, 1)
+        }
+        sleep(0.25)
+        regs = [self.REG_SALINITY, self.REG_TDS]
+        values = self._read_many(regs)
+        result[SEN0604.ReadingType.SALINITY] = int(values[self.REG_SALINITY])
+        result[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS] = int(values[self.REG_TDS])
+        return result
 
     def get_ec_coefficient(self) -> int:
         """

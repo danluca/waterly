@@ -1,3 +1,8 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 from datetime import datetime
 
 def convert_measurement(value: float|int|None, current_unit: str, new_unit: str) -> float|int|None:
@@ -31,6 +36,10 @@ def convert_measurement(value: float|int|None, current_unit: str, new_unit: str)
             return value / 3.785411784
         case "gal", "L":
             return value * 3.785411784
+        case "inch", "mm" | "in", "mm":
+            return value * 25.4
+        case "mm", "inch" | "mm", "in":
+            return value / 25.4
     return value
 
 class Measurement:

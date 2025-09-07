@@ -1,3 +1,8 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 import threading
 import logging
 
@@ -101,7 +106,7 @@ class PulseCounter:
         with self._lock:
             self._count = 0
 
-    def read_and_reset(self, metric: bool) -> float:
+    def read_and_reset(self, metric: bool) -> tuple[float, str]:
         """
         Calculates the amount of water (in liters) that passed since a reset call was issued
         and resets the current pulse count to zero.
@@ -128,8 +133,6 @@ class PulseCounter:
             pulses = self._count
             self._count = 0
         if pulses <= 0:
-            return 0.0
+            return 0.0, "L" if metric else "gal"
         liters = pulses / WATER_FLOW_FREQUENCY_FACTOR / 60.0
-        if metric:
-            return liters
-        return liters / 3.785411784 # gallons
+        return (liters, "L") if metric else (liters / 3.785411784),"gal"

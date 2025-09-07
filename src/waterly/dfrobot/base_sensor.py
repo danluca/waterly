@@ -1,16 +1,20 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 # python
 """
 Base class providing common RS485 Modbus-RTU plumbing and helpers
 for DFRobot sensors.
 """
 
-from __future__ import annotations
-
-from typing import Optional
-
-import modbus_tk
 import serial
 import modbus_tk.defines as cst
+import logging
+
+from time import sleep
+from typing import Optional
 from modbus_tk import modbus_rtu
 from modbus_tk import exceptions as mdb_exc
 
@@ -30,11 +34,14 @@ class BaseRS485ModbusSensor:
     DEFAULT_BYTESIZE = 8
     DEFAULT_PARITY = "N"
     DEFAULT_STOPBITS = 1
-    DEFAULT_TIMEOUT_S = 1.0
+    DEFAULT_TIMEOUT_S = 1.25
 
     # Common device configuration registers (typical across DFRobot RS485 sensors)
     REG_DEVICE_ADDRESS = 0x07D0  # 1..254
     REG_BAUD_RATE = 0x07D1       # 0=2400, 1=4800, 2=9600
+
+    DATA_FUNCTIONS = (cst.READ_HOLDING_REGISTERS, cst.READ_INPUT_REGISTERS)
+    DEFAULT_DATA_FUNCTION = cst.READ_HOLDING_REGISTERS
 
     def __init__(
         self,
@@ -58,6 +65,8 @@ class BaseRS485ModbusSensor:
         self._master = modbus_rtu.RtuMaster(self._serial)
         self._master.set_timeout(timeout)
         self._is_present:bool = False
+        self._pref_data_func = self.DEFAULT_DATA_FUNCTION
+        self._logger = logging.getLogger(f"Sensor-{self.device_addr:#X}")
 
     def close(self) -> None:
         """
@@ -186,6 +195,7 @@ class BaseRS485ModbusSensor:
         Sets the baud rate using a code: 0=2400, 1=4800, 2=9600.
         You may need to reopen the serial port after changing baud.
         """
+        code = 2    # default
         match rate:
             case 2400:
                 code = 0
@@ -197,7 +207,7 @@ class BaseRS485ModbusSensor:
                 raise ValueError("Baud rate must be 2400 (0), 4800 (1), or 9600 (2)")
         if self._serial.baudrate == rate:
             return
-        print(f"Changing baud rate from {self._serial.baudrate} to {rate} baud for device {self.device_addr:#X}..")
+        self._logger.info(f"Changing baud rate from {self._serial.baudrate} to {rate} baud for device {self.device_addr:#X}..")
         self._write_one(self.REG_BAUD_RATE, code)
         self._serial.close()
         self._serial.baudrate = rate
@@ -224,6 +234,7 @@ class BaseRS485ModbusSensor:
             self._is_present = True
         except (serial.SerialTimeoutException, TimeoutError, OSError) as _:
             self._is_present = False
+        return None
 
     def _read_one(self, reg_addr: int) -> int:
         """
@@ -232,10 +243,14 @@ class BaseRS485ModbusSensor:
         """
         # noinspection PyBroadException
         try:
-            data = self.__read_registers(cst.READ_HOLDING_REGISTERS, reg_addr, 1)
+            # self._logger.debug(f"Reading 1 register at {reg_addr} func {self._pref_data_func}")
+            data = self.__read_registers(self._pref_data_func, reg_addr, 1)
             return int(data[0] & 0xFFFF)
         except Exception:
-            data = self.__read_registers(cst.READ_INPUT_REGISTERS, reg_addr, 1)
+            other_data_func = self.DATA_FUNCTIONS[1] if self._pref_data_func == self.DATA_FUNCTIONS[0] else self.DATA_FUNCTIONS[0]
+            # self._logger.debug(f"Reading 1 register at {reg_addr} func {other_data_func}")
+            sleep(0.25)
+            data = self.__read_registers(other_data_func, reg_addr, 1)
             return int(data[0] & 0xFFFF)
 
     def _read_many(self, reg_addrs: list[int]) -> dict[int, int]:
@@ -249,13 +264,19 @@ class BaseRS485ModbusSensor:
         first = reg_addrs[0]
         last = reg_addrs[-1]
         span = last - first + 1
-        for func in (cst.READ_HOLDING_REGISTERS, cst.READ_INPUT_REGISTERS):
+        ordered_data_funcs = self.DATA_FUNCTIONS if self._pref_data_func == self.DATA_FUNCTIONS[0] else self.DATA_FUNCTIONS[::-1]
+        for func in ordered_data_funcs:
             # noinspection PyBroadException
             try:
+                # self._logger.debug(f"Reading {span} registers at {first:#X} func {func}")
                 block = self.__read_registers(func, first, span)
+                # self._logger.debug(f"Read {len(block)} registers: {block}")
                 return {addr: int(block[addr - first] & 0xFFFF) for addr in reg_addrs}
             except Exception:
+                sleep(0.25)
+                # self._logger.debug(f"Failed to read {span} registers at {first} func {func}", exc_info=True)
                 continue
+        self._logger.warning(f"Failed to read {span} registers at {first:#X}, reading one at a time")
         return {addr: self._read_one(addr) for addr in reg_addrs}
 
     def _write_one(self, reg_addr: int, value: int) -> None:

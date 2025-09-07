@@ -1,7 +1,14 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 import signal
 import sys
+import threading
 import time
 import logging
+import platform
 
 from .config import ZONES
 from .patch import Patch
@@ -12,16 +19,24 @@ from .weather import WeatherService
 from .log import init_logging
 from .web import create_app, run_app
 
-def uncaught_exception_handler(exc_type, exc_value, exc_traceback):
+def uncaught_global_exception_handler(exc_type, exc_value, exc_traceback):
     logging.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
     sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+def uncaught_thread_exception_handler(exc_type, exc_value, exc_traceback, thread):
+    logging.critical("Uncaught exception in thread %s", thread.name, exc_info=(exc_type, exc_value, exc_traceback))
+
 
 def main():
     init_logging()
     logger = logging.getLogger("main")
-    sys.excepthook = uncaught_exception_handler
+    sys.excepthook = uncaught_global_exception_handler
+    threading.excepthook = uncaught_thread_exception_handler
 
-    logger.info("Starting application...")
+    os_name = platform.system()
+    os_release = platform.release()
+    os_version = platform.version()
+    logger.info("Starting Waterly application on %s %s %s...", os_name, os_release, os_version)
     # Storage
     init_default_trends()
     create_trends_store()

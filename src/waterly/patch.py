@@ -1,6 +1,12 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 import logging
 from typing import Optional
 from gpiozero import OutputDevice
+from time import sleep
 
 from .model.zone import Zone
 from .dfrobot import SEN0604, SEN0605
@@ -53,7 +59,11 @@ class Patch:
         self.relay_device: OutputDevice = OutputDevice(self.zone.relay_address)
         self.npk_sensor: Optional[SEN0605] = SEN0605(self.zone.npk_sensor_address) if self.zone.npk_sensor_address else None
         self.rh_sensor: SEN0604 = SEN0604(self.zone.rh_sensor_address)
+        #minimum sensor reading to trigger watering - depending on environmental conditions, sensor placement, this can vary from zone to zone
+        self.min_sensor_humidity: float = CONFIG[Settings.MINIMUM_SENSOR_HUMIDITY_PERCENT][self.zone.name]
+        self.target_humidity: float = CONFIG[Settings.HUMIDITY_TARGET_PERCENT][self.zone.name]
         self._logger = logging.getLogger(__name__)
+        self._last_humidity_reading: float = 0.0
 
     @property
     def name(self) -> str:
@@ -94,6 +104,20 @@ class Patch:
         :rtype: bool
         """
         return self.relay_device.value
+
+    @property
+    def current_humidity(self) -> float:
+        """
+        Gets the most recent humidity reading.
+
+        This property retrieves the latest humidity reading recorded by the system. It
+        is useful in applications where real-time or most recent humidity levels are
+        required.
+
+        :return: The most recent humidity reading.
+        :rtype: float
+        """
+        return self._last_humidity_reading
 
     def start_watering(self) -> None:
         """
@@ -166,14 +190,18 @@ class Patch:
         self.rh_sensor.close() if self.has_rh_sensor else None
         self.npk_sensor.close() if self.has_npk_sensor else None
 
-    def humidity(self) -> float:
+    def humidity(self) -> float|None:
         """
         Reads and returns the relative humidity measured by the sensor in percentages.
 
         :return: The relative humidity as a float.
         :rtype: float
         """
-        return self.rh_sensor.read_moisture() if self.has_rh_sensor and self.rh_sensor.is_open else None
+        moisture = self.rh_sensor.read_moisture() if self.has_rh_sensor and self.rh_sensor.is_open else None
+        if moisture is not None:
+            self._last_humidity_reading = moisture
+            return moisture
+        return None
 
     def temperature(self, iso: bool = False) -> float | None:
         """
@@ -288,16 +316,57 @@ class Patch:
         if self.has_rh_sensor and self.rh_sensor.is_open:
             metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
             rh_all = self.rh_sensor.read_all()
-            readings[TrendName.TEMPERATURE] = rh_all[0] if metric else convert_celsius_fahrenheit(rh_all[0])
-            readings[TrendName.HUMIDITY] = rh_all[1]
-            readings[TrendName.ELECTRICAL_CONDUCTIVITY] = rh_all[2]
-            readings[TrendName.PH] = rh_all[3]
-            readings[TrendName.SALINITY] = self.rh_sensor.read_salinity()
-            readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = self.rh_sensor.read_tds()
+            readings[TrendName.TEMPERATURE] = rh_all[SEN0604.ReadingType.TEMPERATURE]
+            if not metric:
+                readings[TrendName.TEMPERATURE] = convert_celsius_fahrenheit(readings[TrendName.TEMPERATURE])
+            readings[TrendName.HUMIDITY] = rh_all[SEN0604.ReadingType.MOISTURE]
+            self._last_humidity_reading = readings[TrendName.HUMIDITY]
+            readings[TrendName.ELECTRICAL_CONDUCTIVITY] = rh_all[SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY]
+            readings[TrendName.PH] = rh_all[SEN0604.ReadingType.PH]
+            readings[TrendName.SALINITY] = rh_all[SEN0604.ReadingType.SALINITY]
+            readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = rh_all[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS]
         # both sensors are on the same serial port (RS485)
         if self.has_npk_sensor and self.npk_sensor.is_open:
+            sleep(0.25)
             npk_all = self.npk_sensor.read_all()
-            readings[TrendName.NITROGEN] = npk_all[0]
-            readings[TrendName.PHOSPHORUS] = npk_all[1]
-            readings[TrendName.POTASSIUM] = npk_all[2]
+            readings[TrendName.NITROGEN] = npk_all[SEN0605.ReadingType.NITROGEN]
+            readings[TrendName.PHOSPHORUS] = npk_all[SEN0605.ReadingType.PHOSPHORUS]
+            readings[TrendName.POTASSIUM] = npk_all[SEN0605.ReadingType.POTASSIUM]
         return readings
+
+    def needs_watering(self):
+        """
+        Determines whether this patch requires watering based on the last humidity reading compared to the target humidity.
+
+        :return: True if watering is needed; False otherwise
+        :rtype: bool
+        """
+        needs_watering: bool = self._last_humidity_reading < self.target_humidity
+        if needs_watering:
+            self._logger.info(f"Watering needed in zone {self.zone.name} - last humidity {self._last_humidity_reading:.2f}% < {self.target_humidity:.2f}%")
+        return needs_watering
+
+    def check_needs_watering(self):
+        """
+        Determines if this patch requires watering based on reading its current humidity levels.
+
+        The method evaluates the humidity of the patch and compares with target humidity
+
+        :return: A boolean value indicating whether the patch needs watering, based on current readings
+        :rtype: bool
+        """
+        self.humidity()
+        return self.needs_watering()
+
+    def has_drought(self):
+        """
+        Determines if a drought condition exists based on the last humidity reading
+        compared to the minimum sensor humidity threshold. Logs a warning if a
+        drought is detected.
+
+        :return: Whether a drought condition exists (True/False)
+        """
+        drought: bool = self._last_humidity_reading < self.min_sensor_humidity
+        if drought:
+            self._logger.warning(f"Drought detected in zone {self.zone.name} - last humidity {self._last_humidity_reading:.2f}% < {self.min_sensor_humidity:.2f}%")
+        return drought

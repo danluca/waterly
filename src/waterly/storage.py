@@ -1,3 +1,8 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 import os
 from datetime import datetime, UTC, tzinfo
 from typing import Any

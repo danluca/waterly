@@ -1,3 +1,9 @@
+
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 import os
 import pytz
 import json
@@ -72,15 +78,17 @@ class Settings(StrEnum):
     :ivar default: The default value associated with the setting.
     :type default: Any
     """
-    HUMIDITY_TARGET_PERCENT = "humidity_target_percent", 70.0
+    HUMIDITY_TARGET_PERCENT = "humidity_target_percent", {ZONES[1].name:70.0, ZONES[2].name:70.0, ZONES[3].name:70.0}
     WATERING_START_TIME = "watering_start_time", "20:30"                            # 8:30pm
     WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", 10
     LAST_WATERING_DATE = "last_watering_date", None
     RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 0.50   # 50%
     UNITS = "units", UnitType.IMPERIAL
     WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours
+    WEATHER_CHECK_OFFSET_FROM_WATERING_SECONDS = "weather_check_offset_from_watering_seconds", 30*60    # 30 minutes
     WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", None
     SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", 60*10            # 10 minutes
+    MINIMUM_SENSOR_HUMIDITY_PERCENT = "minimum_sensor_humidity_percent", {ZONES[1].name:30.0, ZONES[2].name:30.0, ZONES[3].name:30.0}
     TREND_MAX_SAMPLES = "trend_max_samples", 3000                                  # ~ 1 month worth of samples
     LOCAL_TIMEZONE = "local_timezone", DEFAULT_TIMEZONE.zone
     LONGITUDE = "longitude", DEFAULT_LONGITUDE
@@ -225,6 +233,10 @@ class AppConfig:
             self._write_to_file()   # when read from the backing file fails, write the defaults as starting point
 
     def __getitem__(self, arg: Settings) -> Any:
+        if arg.name not in self.settings:
+            self.settings[arg.name] = arg.default
+        elif type(self.settings[arg.name]) != type(arg.default) and arg.default is not None:
+            self.settings[arg.name] = arg.default
         return AppConfig.__unmarshal__(arg, self.settings.get(arg.name))
 
     def __setitem__(self, arg: Settings, value: Any):

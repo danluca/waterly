@@ -1,3 +1,8 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 # python
 """
 DFRobot SEN0605 RS485 Soil Sensor (N, P, K) Modbus-RTU driver.
@@ -23,7 +28,8 @@ Note:
 This driver first tries Input Registers then falls back to Holding for robustness.
 """
 
-from typing import Tuple
+from enum import Enum
+from time import sleep
 
 import struct
 from .base_sensor import BaseRS485ModbusSensor, RS485_PORT
@@ -43,10 +49,10 @@ class SEN0605(BaseRS485ModbusSensor):
     Example usage:
         >>> sensor = SEN0605(port=RS485_PORT)
         >>> try:
-        >>>     n, p, k = sensor.read_all()
-        >>>     print(f"N: {n} mg/kg")
-        >>>     print(f"P: {p} mg/kg")
-        >>>     print(f"K: {k} mg/kg")
+        >>>     r = sensor.read_all()
+        >>>     print(f"N: {r[SEN0605.ReadingType.NITROGEN]} mg/kg")
+        >>>     print(f"P: {r[SEN0605.ReadingType.PHOSPHORUS]} mg/kg")
+        >>>     print(f"K: {r[SEN0605.ReadingType.POTASSIUM]} mg/kg")
         >>> finally:
         >>>     sensor.close()
 
@@ -95,11 +101,17 @@ class SEN0605(BaseRS485ModbusSensor):
     REG_POTASSIUM_COEFFICIENT_LO = 0x03FD   # Temporary storage value of potassium content Low 16 bits of coefficient (floating point value)
     REG_POTASSIUM_DEVIATION = 0x03FE        # Deviation value of the temporary value of potassium content (integer value)
 
+    class ReadingType(Enum):
+        NITROGEN="nitrogen"
+        PHOSPHORUS="phosphorus"
+        POTASSIUM="potassium"
+
     def __init__(self, deviceaddr: int = BaseRS485ModbusSensor.DEFAULT_DEVICE_ADDR, port: str = RS485_PORT,
                  baudrate: int = BaseRS485ModbusSensor.DEFAULT_BAUD, timeout: float = BaseRS485ModbusSensor.DEFAULT_TIMEOUT_S,
                  bytesize: int = BaseRS485ModbusSensor.DEFAULT_BYTESIZE, parity: str = BaseRS485ModbusSensor.DEFAULT_PARITY,
                  stopbits: int = BaseRS485ModbusSensor.DEFAULT_STOPBITS) -> None:
         super().__init__(port, deviceaddr, baudrate, timeout, bytesize, parity, stopbits)
+        self._pref_data_func = self.DATA_FUNCTIONS[1]   # this sensor prefers input registers
 
     def read_nitrogen(self) -> int:
         """
@@ -119,23 +131,26 @@ class SEN0605(BaseRS485ModbusSensor):
         """
         return int(self._read_one(self.REG_POTASSIUM))
 
-    def read_all(self) -> Tuple[int, int, int]:
+    def read_all(self) -> dict[ReadingType, int]:
         """
         Returns (nitrogen_mgkg, phosphorus_mgkg, potassium_mgkg)
         in a single, efficient batch transaction when possible.
         """
         regs = [self.REG_NITROGEN, self.REG_PHOSPHORUS, self.REG_POTASSIUM]
         values = self._read_many(regs)
-        n_val = int(values[self.REG_NITROGEN])
-        p_val = int(values[self.REG_PHOSPHORUS])
-        k_val = int(values[self.REG_POTASSIUM])
-        return n_val, p_val, k_val
+        result = {
+            SEN0605.ReadingType.NITROGEN: int(values[self.REG_NITROGEN]),
+            SEN0605.ReadingType.PHOSPHORUS: int(values[self.REG_PHOSPHORUS]),
+            SEN0605.ReadingType.POTASSIUM: int(values[self.REG_POTASSIUM])
+        }
+        return result
 
     def get_nitrogen_coefficient(self) -> float:
         """
         Reads the temporary value of nitrogen content coefficient (floating point value).
         """
         hi = int(self._read_one(self.REG_NITROGEN_COEFFICIENT_HI))
+        sleep(0.25)
         lo = int(self._read_one(self.REG_NITROGEN_COEFFICIENT_LO))
         return struct.unpack('>f', (hi << 16 | lo).to_bytes(4))[0]
 
@@ -145,6 +160,7 @@ class SEN0605(BaseRS485ModbusSensor):
         """
         hi, lo = struct.unpack('>HH', struct.pack('>f', value))
         self._write_one(self.REG_NITROGEN_COEFFICIENT_HI, hi)
+        sleep(0.25)
         self._write_one(self.REG_NITROGEN_COEFFICIENT_LO, lo)
 
     def get_nitrogen_deviation(self) -> int:
@@ -164,6 +180,7 @@ class SEN0605(BaseRS485ModbusSensor):
         Reads the temporary value of phosphorus content coefficient (floating point value).
         """
         hi = int(self._read_one(self.REG_PHOSPHORUS_COEFFICIENT_HI))
+        sleep(0.25)
         lo = int(self._read_one(self.REG_PHOSPHORUS_COEFFICIENT_LO))
         return struct.unpack('>f', (hi << 16 | lo).to_bytes(4))[0]
 
@@ -173,6 +190,7 @@ class SEN0605(BaseRS485ModbusSensor):
         """
         hi, lo = struct.unpack('>HH', struct.pack('>f', value))
         self._write_one(self.REG_PHOSPHORUS_COEFFICIENT_HI, hi)
+        sleep(0.25)
         self._write_one(self.REG_PHOSPHORUS_COEFFICIENT_LO, lo)
 
     def get_phosphorus_deviation(self) -> int:
@@ -192,6 +210,7 @@ class SEN0605(BaseRS485ModbusSensor):
         Reads the temporary value of potassium content coefficient (floating point value).
         """
         hi = int(self._read_one(self.REG_POTASSIUM_COEFFICIENT_HI))
+        sleep(0.25)
         lo = int(self._read_one(self.REG_POTASSIUM_COEFFICIENT_LO))
         return struct.unpack('>f', (hi << 16 | lo).to_bytes(4))[0]
 
@@ -201,6 +220,7 @@ class SEN0605(BaseRS485ModbusSensor):
         """
         hi, lo = struct.unpack('>HH', struct.pack('>f', value))
         self._write_one(self.REG_POTASSIUM_COEFFICIENT_HI, hi)
+        sleep(0.25)
         self._write_one(self.REG_POTASSIUM_COEFFICIENT_LO, lo)
 
     def get_potassium_deviation(self) -> int:

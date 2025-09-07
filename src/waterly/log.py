@@ -1,3 +1,8 @@
+#  MIT License
+#
+#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#
+
 import logging
 import os
 
@@ -34,7 +39,7 @@ def init_logging(level: int = logging.INFO) -> None:
     ch.formatter.default_msec_format = msfmt
 
     # File handler with rotation
-    fh = TimedRotatingFileHandler(logfile, when='D', interval=30, backupCount=12)  # Keep 12 months
+    fh = TimedRotatingFileHandler(logfile, when='D', interval=30, backupCount=12, encoding='utf-8')  # Keep 12 months
     fh.setLevel(level)
     fh.setFormatter(logging.Formatter(fmt=fmt))
     fh.formatter.default_time_format = datefmt
