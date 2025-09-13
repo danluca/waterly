@@ -13,7 +13,9 @@ from typing import Any
 from enum import StrEnum, Enum
 from datetime import datetime
 from pathlib import Path
+from .model.units import UnitType
 from .model.zone import Zone
+
 
 def get_project_root():
     """
@@ -46,25 +48,9 @@ DATA_DIR = f"{get_project_root()}/data"
 LOG_DIR = f"{get_project_root()}/logs"
 
 # Zones and sensors IDs
-ZONES = {
-    1: Zone("Z1", "Zone 1", 0x0A, None, 19),
-    2: Zone("Z2", "Zone 2", 0x0B, 0x20, 16),
-    3: Zone("Z3", "Zone 3", 0x0C, None, 20),
-}
+ZONES: dict[int, Zone] = {}
+RPI_ZONE_NAME = "RPI"   # must match core data entry for zone 4
 #</editor-fold>
-
-class UnitType(StrEnum):
-    """
-    Represents a unit system for measurement.
-
-    This class is an enumeration of the two used unit systems: Metric and Imperial. It is used to specify
-    and work with the measurement systems in different contexts.
-
-    :cvar METRIC: The metric measurement system, commonly used worldwide.
-    :cvar IMPERIAL: The imperial measurement system, primarily used in the United States.
-    """
-    METRIC = "metric"
-    IMPERIAL = "imperial"
 
 class Settings(StrEnum):
     """
@@ -78,25 +64,23 @@ class Settings(StrEnum):
     :ivar default: The default value associated with the setting.
     :type default: Any
     """
-    HUMIDITY_TARGET_PERCENT = "humidity_target_percent", {ZONES[1].name:70.0, ZONES[2].name:70.0, ZONES[3].name:70.0}
-    WATERING_START_TIME = "watering_start_time", "20:30"                            # 8:30pm
-    WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", 10
-    LAST_WATERING_DATE = "last_watering_date", None
-    RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 0.50   # 50%
-    UNITS = "units", UnitType.IMPERIAL
-    WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours
-    WEATHER_CHECK_OFFSET_FROM_WATERING_SECONDS = "weather_check_offset_from_watering_seconds", 30*60    # 30 minutes
-    WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", None
-    SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", 60*10            # 10 minutes
-    MINIMUM_SENSOR_HUMIDITY_PERCENT = "minimum_sensor_humidity_percent", {ZONES[1].name:30.0, ZONES[2].name:30.0, ZONES[3].name:30.0}
-    TREND_MAX_SAMPLES = "trend_max_samples", 3000                                  # ~ 1 month worth of samples
-    LOCAL_TIMEZONE = "local_timezone", DEFAULT_TIMEZONE.zone
-    LONGITUDE = "longitude", DEFAULT_LONGITUDE
-    LATITUDE = "latitude", DEFAULT_LATITUDE
-    GARDENING_SEASON_START = "gardening_season_start", "03-31"  # MM-DD (inclusive)
-    GARDENING_SEASON_END = "gardening_season_end", "10-31"  # MM-DD (inclusive)
+    HUMIDITY_TARGET_PERCENT = "humidity_target_percent", {"Z1":70.0, "Z2":70.0, "Z3":70.0}
+    WATERING_START_TIME = "watering_start_time", {"value":"20:30"}                            # 8:30pm
+    WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", {"value":10}
+    LAST_WATERING_DATE = "last_watering_date", {"value":None}
+    RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", {"value":50.0}   # 50%
+    UNITS = "units", {"value":UnitType.IMPERIAL}
+    WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", {"value":6*3600}       # 6 hours
+    WEATHER_CHECK_PRE_WATERING_SECONDS = "weather_check_pre_watering_seconds", {"value":30*60}    # 30 minutes
+    WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", {"value":None}
+    SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", {"value":60*10}            # 10 minutes
+    MINIMUM_SENSOR_HUMIDITY_PERCENT = "minimum_sensor_humidity_percent", {"Z1":30.0, "Z2":30.0, "Z3":30.0}
+    TREND_MAX_SAMPLES = "trend_max_samples", {"value":3000}                                  # ~ 1 month worth of samples
+    LOCAL_TIMEZONE = "local_timezone", {"value":DEFAULT_TIMEZONE.zone}
+    LOCATION = "location", {"longitude":DEFAULT_LONGITUDE, "latitude":DEFAULT_LATITUDE}
+    GARDENING_SEASON = "gardening_season", {"start": "03-31", "stop": "10-31"}  # MM-DD (inclusive)
 
-    def __new__(cls, value: str, default: Any = None):
+    def __new__(cls, value: str, default: dict = None):
         obj = str.__new__(cls, value)
         obj._value_ = value
         obj.default = default
@@ -117,15 +101,10 @@ def __json_datetime_encoder(dt:datetime) -> dict[str, str]:
     :return: A dictionary containing the encoded datetime data with keys "__type__", "iso", and "tz".
     :rtype: dict[str, str]
     """
-    stz = None
-    if isinstance(dt.tzinfo, pytz.BaseTzInfo):
-        stz = dt.tzinfo.zone
-    elif dt.tzinfo:
-        stz = dt.tzinfo.tzname(dt)
     return {
         "__type__": "datetime",
         "iso": dt.isoformat(),
-        "tz": stz,
+        "tz": dt.tzinfo.__str__() if dt.tzinfo else "UTC"
     }
 
 def __json_datetime_decoder(obj:dict[str, str]) -> datetime | dict[str, str]:
@@ -153,7 +132,7 @@ def __json_datetime_decoder(obj:dict[str, str]) -> datetime | dict[str, str]:
         tz = DEFAULT_TIMEZONE
     return tz.localize(datetime.fromisoformat(obj["iso"]).replace(tzinfo=None))
 
-def _json_default(o):
+def _json_default(o) -> dict[str, Any]:
     """
     Encodes an object to a JSON-compatible format. This function is used to provide a default
     serialization behavior for config objects that are not inherently serializable by Python's
@@ -177,16 +156,19 @@ def _json_default(o):
     # noinspection PyBroadException
     try:
         if isinstance(o, Enum):
-            return o.value
+            return {"value": o.value}
     except Exception:
         pass
+
+    if isinstance(o, dict):
+        return o
 
     # Generic object: use its __dict__ as a last resort
     if hasattr(o, "__dict__"):
         return o.__dict__
 
     # Fallback to string representation
-    return str(o)
+    return {"value": str(o)}
 
 def _json_object_hook(obj: dict) -> Any:
     """
@@ -216,7 +198,7 @@ class AppConfig:
 
     The class is used to manage application settings, enabling storage, retrieval,
     and persistence of configurations. It ensures proper marshaling and unmarshaling
-    of settings values based on their types, and handles file-based persistence
+    of settings values based on their types and handles file-based persistence
     with thread safety. When no existing configuration file is found, it initializes
     settings with default values.
 
@@ -226,38 +208,75 @@ class AppConfig:
     def __init__(self):
         # If no config provided, use factory defaults
         self._lock = threading.RLock()
-        self._settings_file = f"{DATA_DIR}/settings.json"
         self.settings: dict[str, Any] = DEFAULT_SETTINGS.copy()
-        os.makedirs(os.path.dirname(self._settings_file), exist_ok=True)
-        if not self._read_from_file():
-            self._write_to_file()   # when read from the backing file fails, write the defaults as starting point
+        self._settings_file = f"{DATA_DIR}/settings.json"
+        self._persist_callback = None  # injected persistence (e.g., DB) to avoid circular import
 
     def __getitem__(self, arg: Settings) -> Any:
         if arg.name not in self.settings:
-            self.settings[arg.name] = arg.default
-        elif type(self.settings[arg.name]) != type(arg.default) and arg.default is not None:
             self.settings[arg.name] = arg.default
         return AppConfig.__unmarshal__(arg, self.settings.get(arg.name))
 
     def __setitem__(self, arg: Settings, value: Any):
         self.settings[arg.name] = AppConfig.__marshal__(arg, value)
+        # Defer cross-module persistence via injected callback to avoid circular imports
+        cb = self._persist_callback
+        if callable(cb):
+            # noinspection PyBroadException
+            try:
+                cb(arg, self.settings[arg.name])
+            except Exception:
+                # Do not let persistence failures break config assignment
+                pass
+
+    def save_to_file(self):
+        os.makedirs(os.path.dirname(self._settings_file), exist_ok=True)
         self._write_to_file()
 
-    @staticmethod
-    def __unmarshal__(arg: Settings, value: Any) -> Any:
-        match arg:
-            case Settings.LOCAL_TIMEZONE:
-                return pytz.timezone(value)
-            case _:
-                return value
+    def read_from_file(self):
+        os.makedirs(os.path.dirname(self._settings_file), exist_ok=True)
+        if not self._read_from_file():
+            self._write_to_file()   # when read from the backing file fails, write the defaults as starting point
+
+    def init_item(self, item: Settings, value: dict[str, Any] = None):
+        self.settings[item.name] = value if value else item.default
+
+    def set_persist_callback(self, callback):
+        """
+        Inject a persistence callback with signature (setting: Settings, marshaled_value: dict[str, Any]) -> None
+        to persist changes outside this module (e.g., database).
+        """
+        with self._lock:
+            self._persist_callback = callback
 
     @staticmethod
-    def __marshal__(arg: Settings, value: Any) -> Any:
+    def __unmarshal__(arg: Settings, value: dict[str, Any]) -> Any:
         match arg:
             case Settings.LOCAL_TIMEZONE:
-                return value.zone if isinstance(value, pytz.BaseTzInfo) else value
+                return pytz.timezone(value["value"])
             case _:
-                return value
+                if "value" in value:
+                    return value["value"]
+                elif "__type__" in value:
+                    return _json_object_hook(value)
+                else:
+                    return value
+
+    @staticmethod
+    def __marshal__(arg: Settings, value: Any) -> dict[str, Any]:
+        match arg:
+            case Settings.LOCAL_TIMEZONE:
+                if isinstance(value, pytz.BaseTzInfo):
+                    return {"value": value.zone}
+                elif isinstance(value, dict):
+                    return value
+                else:
+                    return {"value": value}
+            case _:
+                if isinstance(value, dict) and "value" in value and len(value) == 1:
+                    return value
+                else:
+                    return _json_default(value)
 
     def _read_from_file(self) -> bool:
         with self._lock:

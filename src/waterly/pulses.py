@@ -106,7 +106,7 @@ class PulseCounter:
         with self._lock:
             self._count = 0
 
-    def read_and_reset(self, metric: bool) -> tuple[float, str]:
+    def read_and_reset(self) -> float:
         """
         Calculates the amount of water (in liters) that passed since a reset call was issued
         and resets the current pulse count to zero.
@@ -118,10 +118,7 @@ class PulseCounter:
         This function assumes that pulse measurements are accumulated until this call
         and resets the count upon execution.
 
-        :param metric: Whether the returned value should be in metric units (liters) or
-            imperial units (gallons).
-        :type metric: bool
-        :return: Calculated volume of water in liters or gallons based on the measured pulses since reset.
+        :return: Calculated volume of water in liters based on the measured pulses since reset.
         :rtype: float
         """
         # Convert counted pulses to liters - turns out the duration is irrelevant
@@ -133,6 +130,6 @@ class PulseCounter:
             pulses = self._count
             self._count = 0
         if pulses <= 0:
-            return 0.0, "L" if metric else "gal"
+            return 0.0
         liters = pulses / WATER_FLOW_FREQUENCY_FACTOR / 60.0
-        return (liters, "L") if metric else (liters / 3.785411784),"gal"
+        return liters

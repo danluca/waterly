@@ -4,8 +4,11 @@
 #
 
 from datetime import datetime
+from typing import Optional
 
-def convert_measurement(value: float|int|None, current_unit: str, new_unit: str) -> float|int|None:
+from .units import Unit
+
+def convert_measurement(value: float|int|None, current_unit: Unit, new_unit: Unit) -> float|int|None:
     """
     Convert values between different measurement units.
 
@@ -17,7 +20,7 @@ def convert_measurement(value: float|int|None, current_unit: str, new_unit: str)
     :param value: The numeric value to be converted. Can be an integer, float, or None.
     :type value: float | int | None
     :param current_unit: The current measurement unit of the value.
-    :type current_unit: str
+    :type current_unit: Unit
     :param new_unit: The desired measurement unit to convert to.
     :type new_unit: str
     :return: The converted value as an integer or float, or None if the input value is None.
@@ -28,17 +31,17 @@ def convert_measurement(value: float|int|None, current_unit: str, new_unit: str)
     if value is None:
         return None
     match current_unit, new_unit:
-        case "°C", "°F":
+        case Unit.CELSIUS, Unit.FAHRENHEIT:
             return value * 9/5 + 32
-        case "°F", "°C":
+        case Unit.FAHRENHEIT, Unit.CELSIUS:
             return (value - 32) * 5 / 9
-        case "L", "gal":
+        case Unit.LITERS, Unit.GALLONS:
             return value / 3.785411784
-        case "gal", "L":
+        case Unit.GALLONS, Unit.LITERS:
             return value * 3.785411784
-        case "inch", "mm" | "in", "mm":
+        case Unit.INCHES, Unit.MM:
             return value * 25.4
-        case "mm", "inch" | "mm", "in":
+        case Unit.MM, Unit.INCHES:
             return value / 25.4
     return value
 
@@ -46,17 +49,17 @@ class Measurement:
     """
     Represents a measurement with a timestamp, a numeric value, and its unit.
 
-    :ivar time: The datetime when the measurement was recorded.
-    :type time: datetime
-    :ivar value: The numerical value of the measurement; can be a float, int, or None if no value is assigned.
-    :type value: float | int | None
-    :ivar unit: The unit of the value (e.g., "°C", "°F", "L", "gal"). If no unit is specified, the owning trend unit will be used.
-    :type unit: str
+    :ivar _data: The numerical value of the measurement; can be a float, int, or None if no value is assigned.
+    :type _data: float | int | None
+    :ivar _unit: The unit of the value (e.g., "°C", "°F", "L", "gal"). If no unit is specified, the owning trend unit will be used.
+    :type _unit: Unit | None
+    :ivar _time: The datetime when the measurement was recorded.
+    :type _time: datetime | None
     """
-    def __init__(self, time: datetime, value: float | int | None, unit: str = ""):
-        self._time: datetime = time
+    def __init__(self, value: float | int | None, unit: Unit | None = None, time: Optional[datetime] = None):
         self._data: float | int | None = value
-        self._unit: str = unit
+        self._unit: Unit = unit
+        self._time: datetime = time
 
     @property
     def time_iso(self) -> str:
@@ -66,7 +69,7 @@ class Measurement:
         :return: ISO 8601 representation of time.
         :rtype: str
         """
-        return self._time.isoformat()
+        return self._time.isoformat() if self._time else ""
 
     @property
     def value(self) -> float | int | None:
@@ -89,7 +92,7 @@ class Measurement:
         return self._time
 
     @property
-    def unit(self) -> str:
+    def unit(self) -> Unit:
         """
         Returns the unit of the measurement.
 
@@ -98,7 +101,7 @@ class Measurement:
         """
         return self._unit
 
-    def convert(self, new_unit: str) -> "Measurement":
+    def convert(self, new_unit: Unit) -> "Measurement":
         """
         Convert the current measurement to a specified unit.
 
@@ -112,7 +115,7 @@ class Measurement:
         :return: A new Measurement object with the converted data and specified unit.
         :rtype: Measurement
         """
-        return Measurement(self._time, convert_measurement(self._data, self._unit, new_unit), new_unit)
+        return Measurement(convert_measurement(self._data, self._unit, new_unit), new_unit, self._time)
 
     def json_encode(self):
         return {
@@ -126,7 +129,7 @@ class Measurement:
         if "__type__" in obj and obj["__type__"] == "Measurement":
             time = obj.get("time")
             value = obj.get("value")
-            return Measurement(time, value)
+            return Measurement(value, time=time)
         return None
 
     def __str__(self) -> str:
@@ -148,15 +151,15 @@ class WateringMeasurement(Measurement):
     that are specific to watering measurements. It includes functionality for encoding to JSON
     and reconstructing from JSON, as well as a human-readable string representation.
 
-    :ivar time: The date and time when the measurement was taken.
-    :type time: datetime
-    :ivar value: The numeric value of the measurement.
-    :type value: float
-    :ivar unit: The unit of the measurement.
-    :type unit: str
+    :ivar _humidity_start: The humidity level before watering.
+    :type _humidity_start: float
+    :ivar _humidity_end: The humidity level after watering.
+    :type _humidity_end: float
+    :ivar _duration_sec: The duration of the watering process in seconds.
+    :type _duration_sec: int
     """
-    def __init__(self, time: datetime, value: float, unit: str, humidity_start: float, humidity_end: float, duration_sec: int):
-        super().__init__(time, value, unit)
+    def __init__(self, time: datetime, value: float, unit: Unit, humidity_start: float, humidity_end: float, duration_sec: int):
+        super().__init__(value, unit, time)
         self._humidity_start = humidity_start
         self._humidity_end = humidity_end
         self._duration_sec = duration_sec
@@ -200,7 +203,7 @@ class WateringMeasurement(Measurement):
         """
         return self._humidity_start
 
-    def convert(self, new_unit: str) -> "WateringMeasurement":
+    def convert(self, new_unit: Unit) -> "WateringMeasurement":
         """
         Convert the current measurement to a specified unit.
 
@@ -210,7 +213,7 @@ class WateringMeasurement(Measurement):
         original time of the measurement and all other attributes.
 
         :param new_unit: The unit to which the measurement will be converted.
-        :type new_unit: str
+        :type new_unit: Unit
         :return: A new WateringMeasurement object with the converted data and specified unit.
         :rtype: WateringMeasurement
         """
@@ -221,6 +224,7 @@ class WateringMeasurement(Measurement):
             "__type__": "WateringMeasurement",
             "time": self._time,
             "value": self._data,
+            "unit": self._unit,
             "humidity_start": self._humidity_start,
             "humidity_end": self._humidity_end,
             "duration_sec": self._duration_sec
@@ -234,7 +238,7 @@ class WateringMeasurement(Measurement):
             humidity_start = obj.get("humidity_start")
             humidity_end = obj.get("humidity_end")
             duration_sec = obj.get("duration_sec")
-            return WateringMeasurement(time, value, "", humidity_start, humidity_end, duration_sec)
+            return WateringMeasurement(time, value, Unit(obj.get("unit")), humidity_start, humidity_end, duration_sec)
         return None
 
     def __str__(self) -> str:

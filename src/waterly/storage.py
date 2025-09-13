@@ -2,385 +2,363 @@
 #
 #  Copyright (c) 2025 by Dan Luca. All rights reserved.
 #
-
-import os
-from datetime import datetime, UTC, tzinfo
+# python
+import glob
+import json
+import sqlite3
+import hashlib
+import logging
+import re
+from contextlib import contextmanager
+from datetime import datetime, UTC
 from typing import Any
-from enum import StrEnum
-from .config import DATA_DIR, CONFIG, Settings, ZONES, UnitType
-from .model.measurement import WateringMeasurement
-from .model.trend import TrendSet, Measurement, convert_measurement
-from .json.serialization import ThreadSafeJSON
 
-def write_text_file(path: str, content: str) -> None:
+from .config import get_project_root, Settings, CONFIG, RPI_ZONE_NAME, ZONES, AppConfig
+from .model.measurement import Measurement, WateringMeasurement
+from .model.times import valid_timezone
+from .model.trend import TrendName
+from .model.units import Unit, UnitType
+from .model.weather_data import WeatherData
+from .model.zone import Zone
+
+__db_file_name = f"{get_project_root()}/data/waterly-{datetime.now().year}.sqlite"
+
+@contextmanager
+def db(path=__db_file_name):
     """
-    Write the given text to 'path', overwriting if it exists.
-    Uses a temporary file + atomic replace to avoid partial writes.
-    Creates parent directories if they don't exist.
-    """
-    # Ensure parent directory exists
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Context manager for managing a SQLite database connection. This context manager provides
+    a connection to a SQLite database identified by the given path, with autocommit mode enabled.
+    It ensures that the connection is properly closed when exiting the context.
 
-    tmp_path = f"{path}.tmp"
-    try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        # Atomic on POSIX; safe overwrite on Windows
-        os.replace(tmp_path, path)
-    finally:
-        # Best-effort cleanup if something went wrong before replace
-        # noinspection PyBroadException
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
-
-
-class RollingThreadSafeJSON(ThreadSafeJSON):
-    """
-    Provides a rolling mechanism for JSON data that allows safe updates across threads
-    while dynamically updating file paths based on the current year.
-
-    This class extends the functionality of ThreadSafeJSON to automatically adapt the
-    storage path of JSON files according to the current year. It enforces the presence
-    of a '%YEAR%' placeholder in the given path and resolves it during file operations.
-
-    :ivar path: The file path template containing the '%YEAR%' placeholder.
+    :param path: Optional; File path to the SQLite database. Defaults to a path named
+        "<project_root>/data/waterly-<current_year>.sqlite".
     :type path: str
-    :ivar default: The default data to use if the JSON file does not exist.
-    :type default: Any
+    :return: A SQLite connection object that can be used within the context.
+    :rtype: sqlite3.Connection
     """
-    def __init__(self, path: str, default: Any):
-        self._pathPattern = path
-        if ("%YEAR%" not in self._pathPattern) and ("%MONTH%" not in self._pathPattern):
-            raise ValueError("Path pattern must contain both %YEAR% and %MONTH% placeholders")
-        # Initialize base with the resolved current-year path; the file is created at the correct location immediately
-        super().__init__(self.get_current_file_path(), default)
+    conn = sqlite3.connect(path, timeout=10, isolation_level=None)  # autocommit
+    try:
+        yield conn
+    finally:
+        conn.close()
 
-    def get_current_file_path(self) -> str:
-        """
-        Gets the current file path with the placeholder for the year replaced by
-        the current year.
-
-        This method replaces the "%YEAR%" keyword in the file path with the actual
-        current year retrieved via a helper function.
-
-        :return: The updated file path with the year properly replaced.
-        :rtype: str
-        """
-        dt = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
-        return self._pathPattern.replace("%YEAR%", dt.strftime("%Y")).replace("%MONTH%", dt.strftime("%m_%b"))
-
-    def read(self) -> Any:
-        """
-        Reads data using the current file path through the parent `read` method.
-        
-        Updates the instance's file path based on the current year, then calls and 
-        returns data from the parent read operation. When the year advances, a new 
-        file is created with default content.
-
-        :return: Data read from the file 
-        :rtype: Any
-        """
-        self.path = self.get_current_file_path()
-        return super().read()
-
-    def update(self, updater):
-        """
-        Updates the current file path and invokes the parent class update method.
-
-        :param updater: The object used to perform the update operation.
-        :return: The result of the update operation from the parent class method.
-        """
-        self.path = self.get_current_file_path()
-        return super().update(updater)
-
-
-class TrendName(StrEnum):
+def get_db_version(conn) -> tuple[str, str]:
     """
-    Enumeration for trend names in various environmental and measurement parameters.
+    Retrieves the current database version number from the migration history.
 
-    This enumeration defines constants representing different types of environmental
-    and chemical trends such as humidity, temperature, and salinity, among others.
-    Each value is represented as a string constant, which can be used to denote
-    specific types of monitored or measured trends in applications.
+    This function checks whether the database is initialized. If the database
+    is initialized, it fetches the most recent version from the
+    `migration_history` table. If not initialized, it defaults to returning
+    a version of "0.0.0".
 
+    :param conn: The database connection object used to perform the query.
+    :type conn: Connection
+    :return: A string representing the current database version from migration
+             history, or "0.0.0" if the database is uninitialized.
+    :rtype: str
     """
-    HUMIDITY = "humidity"
-    TEMPERATURE = "temperature"
-    PH = "ph"
-    ELECTRICAL_CONDUCTIVITY = "ec"
-    SALINITY = "salinity"
-    TOTAL_DISSOLVED_SOLIDS = "tds"
-    NITROGEN = "nitrogen"
-    PHOSPHORUS = "phosphorus"
-    POTASSIUM = "potassium"
-    WATER = "water"
-    RPI_TEMPERATURE = "rpitemp"
+    if __is_db_initialized(conn):
+        cur = conn.cursor()
+        cur.execute("SELECT version, checksum FROM migration_history ORDER BY version DESC LIMIT 1")
+        return cur.fetchone()
+    else:
+        return "0.0.0", "0000"
 
-__rpi_zone_name = "RPI"
-
-DEFAULT_TRENDS: dict[TrendName, TrendSet] = {}
-trends_store: dict[TrendName, RollingThreadSafeJSON] = {}
-
-def init_default_trends():
+def __has_script_version(conn, scr_version):
     """
-    Initializes default trend configurations for various environmental metrics if they are not
-    already defined. The function populates the global `DEFAULT_TRENDS` dictionary with trend
-    data associated with different environmental metrics like humidity, temperature, pH, salinity,
-    and nutrient levels. Trends are created based on the predefined zones and associated configuration
-    settings such as unit system and maximum sample size.
+    Checks if a specific script version exists in the migration history table.
 
-    :param DEFAULT_TRENDS: Global dictionary intended to store predefined environmental trend
-                           data mapped by trend names.
-    :type DEFAULT_TRENDS: dict
+    This function verifies whether a given migration version is recorded in the
+    database's `migration_history` table. It first ensures that the database has
+    been initialized before proceeding with the query.
 
-    :raises KeyError: If specific keys required from configuration `CONFIG` are unavailable.
+    :param conn: The database connection object.
+    :type conn: sqlite3.Connection
+    :param scr_version: The script version to check in the migration history.
+    :type scr_version: str
+    :return: A boolean indicating whether the script version exists.
+    :rtype: bool
+    """
+    if not __is_db_initialized(conn):
+        return False
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM migration_history WHERE version=?", (scr_version,))
+    return cur.fetchone()[0] > 0
+
+def __is_db_initialized(conn):
+    """
+    Checks if the database has been initialized by verifying the presence of migration tables.
+
+    :param conn: Database connection object.
+    :type conn: sqlite3.Connection
+    :return: True if the database is initialized with migration tables, False otherwise.
+    :rtype: bool
+    """
+    return conn.execute("select count(*) as table_count from sqlite_master sm where sm.type = 'table' and sm.name like 'migration_%'").fetchone()[0] > 0
+
+def init_db():
+    """
+    Initializes the database by applying required migrations and settings.
+
+    This function checks the current state of the database and determines if any
+    new migrations need to be applied. If the database is already at the latest
+    version, it logs an informational message and exits. Otherwise, it runs the necessary
+    migrations by executing SQL scripts in order, verifies their completion, and updates
+    the migration history. Additionally, specific database pragmas for optimization and foreign
+    key support are enabled during initialization.
+
+    :raises RuntimeError: When encountering errors during SQL execution or migrations.
+    """
+    logger = logging.getLogger("init_db")
+    # noinspection PyBroadException
+    try:
+        # Expose DB-backed persistence for AppConfig writes
+        CONFIG.set_persist_callback(save_config_item)
+    except Exception:
+        # If configuration isn't fully initialized yet, skip; the setter can be called later if needed.
+        logger.warning("Failed to expose hook persistence callback into AppConfig, skipping.")
+        pass
+
+    ddl_files = sorted(glob.glob(f"{get_project_root()}/waterly/db/*.sql"), key=lambda x: x.split("_")[-1])
+    latest_version = re.search(r"_v([\d+.]+)\.", ddl_files[-1], re.RegexFlag.IGNORECASE).group(1)
+    with db() as conn:
+        cur = conn.cursor()
+        if __is_db_initialized(conn):
+            db_version, checksum = get_db_version(conn)
+            if db_version == latest_version:
+                logger.info(f"Database already initialized; currently at version {db_version} (hash {checksum})")
+                return
+            else:
+                logger.info(f"Database is out of date; current version {db_version} (hash {checksum}), latest version {latest_version}")
+        logger.info("Initializing/Migrating database...")
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA foreign_keys = ON")     # Enable foreign keys
+        # data model - read the files db/ddl*.sql and execute them as script in the versions order
+        for ddl_file in ddl_files:
+            with open(ddl_file, "r") as f:
+                script_version = re.search(r"_v([\d+.]+)\.", ddl_file, re.RegexFlag.IGNORECASE).group(1)
+                # do we need to run this migration?
+                if not __has_script_version(conn, script_version):
+                    logger.info(f"Running migration {script_version} from {ddl_file}")
+                    script: str = f.read()
+                    cur.executescript(script)
+                    # create sha-256 of the file contents and insert as version into migration_history table
+                    checksum = hashlib.sha256(script.encode("utf-8")).hexdigest()
+                    cur.execute("INSERT INTO migration_history(version, description, checksum) VALUES (?, ?, ?)", (script_version,f"Schema {script_version} at {ddl_file}", checksum))
+                    conn.commit()
+                    logger.info(f"Migration {script_version} completed")
+                else:
+                    logger.info(f"Migration {script_version} already applied")
+
+
+def get_config_from_db() -> AppConfig:
+    """
+    Fetches configuration settings from the database and returns them parsed into the
+    `AppConfig` structure. If any setting from `Settings` is not found in the database,
+    this method adds the default value for it in the database and commits the changes.
+
+    :raises DatabaseError: If there are issues with database connectivity or execution.
+    :raises JSONDecodeError: If a setting value in the database cannot be decoded from JSON.
+
+    :return: The application configuration settings.
+    :rtype: AppConfig
+    """
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM config")
+        raw_settings = dict(cur.fetchall())
+        #parse into CONFIG structure
+        for setting in Settings:
+            if setting.name in raw_settings:
+                CONFIG[setting] = json.loads(raw_settings[setting.name])
+            else:
+                CONFIG[setting] = setting.default
+                cur.execute("INSERT INTO config(type, value) VALUES (?, ?)", (setting.name, json.dumps(setting.default)))
+                conn.commit()
+        return CONFIG
+
+def save_config_to_db():
+    """
+    Save application configuration to the database.
+
+    This function iterates through all settings defined in the Settings enumeration, updating
+    their corresponding values in the 'config' database table. The function serializes each
+    configuration setting to a JSON string before storing it in the database. All changes
+    are committed upon successfully updating the database records.
 
     :return: None
     """
-    global DEFAULT_TRENDS
+    with db() as conn:
+        cur = conn.cursor()
+        for setting in Settings:
+            cur.execute("UPDATE config SET value=? WHERE type=?", (json.dumps(CONFIG.settings[setting.name]), setting.name))
+        conn.commit()
 
-    if len(DEFAULT_TRENDS) > 0:
-        return
-
-    metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
-    DEFAULT_TRENDS[TrendName.HUMIDITY] = TrendSet([z.name for z in ZONES.values()], TrendName.HUMIDITY, "%", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.TEMPERATURE] = TrendSet([z.name for z in ZONES.values()], TrendName.TEMPERATURE, "°C" if metric else "°F", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.PH] = TrendSet([z.name for z in ZONES.values()], TrendName.PH, "pH", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY] = TrendSet([z.name for z in ZONES.values()], TrendName.ELECTRICAL_CONDUCTIVITY, "µS/cm", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.SALINITY] = TrendSet([z.name for z in ZONES.values()], TrendName.SALINITY, "ppt", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS] = TrendSet([z.name for z in ZONES.values()], TrendName.TOTAL_DISSOLVED_SOLIDS, "ppm", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.NITROGEN] = TrendSet([z.name for z in ZONES.values()], TrendName.NITROGEN, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.PHOSPHORUS] = TrendSet([z.name for z in ZONES.values()], TrendName.PHOSPHORUS, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.POTASSIUM] = TrendSet([z.name for z in ZONES.values()], TrendName.POTASSIUM, "mg/kg", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.WATER] = TrendSet([z.name for z in ZONES.values()], TrendName.WATER, "L" if metric else "gal", CONFIG[Settings.TREND_MAX_SAMPLES])
-    DEFAULT_TRENDS[TrendName.RPI_TEMPERATURE] = TrendSet([__rpi_zone_name], TrendName.RPI_TEMPERATURE, "°C" if metric else "°F", CONFIG[Settings.TREND_MAX_SAMPLES])
-
-def create_trends_store():
+def save_config_item(item: Settings, value: dict[str, Any]):
     """
-    Initializes the `trends_store` global variable with instances of RollingThreadSafeJSON for
-    each trend in TrendName if it is not already populated.
+    Update the configuration item in the database with the specified value.
 
-    The `trends_store` is filled with paths to JSON files for each trend, where the file paths are
-    formatted to include the respective year and month. These files are used to store trend data,
-    with default values sourced from `DEFAULT_TRENDS`.
+    This function updates a configuration setting in the database. The `item` specifies
+    the configuration type, while `value` is the new data to be stored for that
+    configuration. The function ensures that the provided value is serialized into JSON
+    format before being saved to the database.
 
+    :param item: The configuration type to be updated. This value is an instance of Settings, which defines the configuration type in the application.
+    :param value: The new configuration value to be stored in the database. It must be a dictionary with string keys and values of any type.
     :return: None
     """
-    global trends_store
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE config SET value=? WHERE type=?", (json.dumps(value), item.name))
+        conn.commit()
 
-    if len(trends_store) > 0:
-        return
-
-    for trendName in TrendName:
-        trends_store[trendName] = RollingThreadSafeJSON(f"{DATA_DIR}/%YEAR%/%MONTH%_{trendName.value}.json", DEFAULT_TRENDS[trendName])
-
-def _now_utc() -> datetime:
-    return datetime.now(UTC)
-
-def _now_utc_str() -> str:
-    return datetime.now(UTC).replace(tzinfo=None).isoformat(timespec='milliseconds') + "Z"
-
-def _now_local(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE]) -> datetime:
-    return datetime.now(tz)
-
-def _now_local_str(tz: tzinfo = CONFIG[Settings.LOCAL_TIMEZONE], fmt: str = "%FT%T.%f%z%Z") -> str:
-    return datetime.now(tz).strftime(fmt)
-
-def record_measurement(trend: TrendName, zone: str, measurement: Measurement):
+def get_zones_from_db() -> dict[int, Zone]:
     """
-    Records a measurement for a specific trend and zone with the given value.
+    Fetches zone data from the database and populates it into the ZONES dictionary.
 
-    This function updates the trends store by adding a new measurement for the
-    specified trend and zone. The measurement is timestamped with the current
-    local time.
+    Executes a query to retrieve zone details including ID, name, description, RH sensor address, NPK sensor
+    address, and relay address. The data is then stored in the ZONES dictionary with the zone ID as the key
+    and an instance of the Zone class as the value. The function returns the updated ZONES dictionary.
 
-    :param trend: The name of the trend to update
-    :type trend: TrendName
-    :param zone: The identifier for the zone
+    :return: A dictionary mapping zone IDs to Zone objects.
+    :rtype: dict[int, Zone]
+    """
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name, description, rh_sensor_address, npk_sensor_address, relay_address FROM zone")
+        for zone in cur.fetchall():
+            ZONES[zone[0]] = Zone(zone[1], zone[2], zone[3], zone[4], zone[5])
+        return ZONES
+
+def __add_measurement(trend: str, zone: str, measurement: Measurement):
+    """
+    Adds a new measurement into the database. The measurement is associated with a specific
+    trend and zone, includes a timestamp, a reading value, and its unit of measurement. It
+    uses a database connection to insert or replace the data into the 'measurement' table.
+
+    :param trend: A string representing the name of the trend to which the measurement belongs.
+    :type trend: str
+    :param zone: A string representing the name of the zone in which the measurement was taken.
     :type zone: str
-    :param measurement: The measurement to be recorded.
+    :param measurement: The object representing the measurement - timestamp, value, unit.
     :type measurement: Measurement
     :return: None
     """
-    def _upd(data: TrendSet):
-        new_unit = data.trend(zone).unit
-        data.add_value(zone, measurement.convert(new_unit))
-        return data
-    trends_store[trend].update(_upd)
+    with db() as conn:
+        zone_id = conn.execute("SELECT id FROM zone WHERE name=?", (zone,)).fetchone()
+        conn.execute("INSERT OR REPLACE INTO measurement(name, zone_id, ts_utc, tz, reading, unit) VALUES (?,?,?,?,?,?)",
+            (trend, zone_id[0], int(measurement.timestamp.timestamp() * 1000), str(measurement.timestamp.tzinfo),
+             measurement.value, measurement.unit))
+        conn.commit()
 
-def record_humidity(zone: str, value: float):
+def record_measurement(trend: TrendName, zone: str, measurement: Measurement, unit: Unit = None):
     """
-    Records the humidity measurement for a specified zone. This function provides
-    a way to associate a humidity trend with the given location and its value.
-
-    :param zone: The name of the zone or location where the humidity measurement
-        is being recorded.
+    Store a measurement into the database with the provided unit (no in-DB conversion).
+    :param trend: A string representing the name of the trend to which the measurement belongs.
+    :type trend: str
+    :param zone: A string representing the name of the zone in which the measurement was taken.
     :type zone: str
-    :param value: The humidity level to be recorded, represented as a floating-point
-        number.
-    :type value: float
+    :param measurement: The object representing the measurement - timestamp, value, unit.
+    :type measurement: Measurement
+    :param unit: An optional string representing a new unit for measurement argument to be converted to (e.g., 'Celsius', 'kW').
+    :type unit: Unit
     :return: None
     """
-    record_measurement(TrendName.HUMIDITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit))
-
-def record_temperature(zone: str, value: float):
-    """
-    Records a temperature measurement for a specified zone. The function captures
-    the temperature value and associates it with the specified zone.
-
-    :param zone: The name of the zone for which the temperature is being recorded.
-    :type zone: str
-    :param value: The temperature value to record.
-    :type value: float
-    :return: None
-    """
-    unit = "°C" if CONFIG[Settings.UNITS] == UnitType.METRIC else "°F"
-    record_measurement(TrendName.TEMPERATURE, zone, Measurement(_now_local(), value, unit))
-
-def record_electrical_conductivity(zone: str, value: int):
-    """
-    Records the electrical conductivity measurement for a specified zone with the given value.
-
-    This function is responsible for logging or saving the electrical conductivity data associated
-    with a specific zone.
-
-    :param zone: The name of the zone for which the electrical conductivity measurement is being recorded.
-    :type zone: str
-    :param value: The numerical value of the electrical conductivity measurement.
-    :type value: int
-    :return: None
-    """
-    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit))
-
-def record_total_dissolved_solids(zone: str, value: int):
-    """
-    Records the measurement of total dissolved solids for a specified zone.
-
-    This function logs a measurement for the total dissolved solids in a designated zone.
-
-    :param zone: The name of the zone for which the measurement is being recorded.
-    :type zone: str
-    :param value: The measured value of total dissolved solids to be recorded.
-    :type value: int
-    """
-    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit))
-
-def record_ph(zone: str, value: float):
-    """
-    Records the pH measurement for the specified zone.
-
-    :param zone: The identifier of the zone where the measurement is obtained.
-    :type zone: str
-    :param value: The pH value recorded for the specified zone.
-    :type value: float
-    :return: None
-    """
-    record_measurement(TrendName.PH, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.PH].trend(zone).unit))
-
-def record_salinity(zone: str, value: int):
-    """
-    Records the salinity measurement for a specified zone.
-
-    :param zone: The zone identifier where the salinity measurement is taken.
-    :type zone: str
-    :param value: The salinity value to be recorded.
-    :type value: int
-    :return: None
-    """
-    record_measurement(TrendName.SALINITY, zone, Measurement(_now_local(), value, DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit))
+    msmt = measurement if unit is None or unit == measurement.unit else measurement.convert(unit)
+    __add_measurement(trend, zone, msmt)
 
 def record_rpi_temperature(value: Measurement):
     """
-    Records the temperature measurement of the Raspberry Pi board. This function assigns
-    the measurement to a specific trend and a default zone specific to the Raspberry Pi
-    temperature context.
-
-    :param value: The temperature value of the Raspberry Pi board to record in the unit configured for the trend.
-    :type value: Measurement
+    Records the Raspberry Pi board temperature under a dedicated zone.
     """
-    record_measurement(TrendName.RPI_TEMPERATURE, __rpi_zone_name, value)      # the RPI board temperature is not zone-specific; using always zone 1
+    record_measurement(TrendName.RPI_TEMPERATURE, RPI_ZONE_NAME, value)
 
-def record_rh(zone: str, rh: float, temp: float, ph: float, ec: int, sal: int, tds: int):
-    """
-    Records environmental measurements such as relative humidity, temperature, pH level,
-    electrical conductivity, salinity, and total dissolved solids for a specified zone.
-    This function updates the respective trends for a given zone in the monitoring system.
-
-    :param zone: The identifier for the specific area being recorded.
-    :type zone: str
-    :param rh: The relative humidity value to be recorded in percent.
-    :type rh: float
-    :param temp: The temperature value to be recorded in degrees Celsius or Fahrenheit, depending on the unit configuration of the trend.
-    :type temp: float
-    :param ph: The pH level to be recorded.
-    :type ph: float
-    :param ec: The electrical conductivity value to be recorded in microsiemens per centimeter (μS/cm).
-    :type ec: int
-    :param sal: The salinity value to be recorded
-    :type sal: int
-    :param tds: The total dissolved solids value to be recorded
-    :type tds: int
-    :return: None
-    """
+def record_rh(zone: str, rh: Measurement, temp: Measurement, ph: Measurement, ec: Measurement, sal: Measurement, tds: Measurement):
     metric = CONFIG[Settings.UNITS] == UnitType.METRIC
-    # Create a dictionary to store trend and unit mappings to reduce repetitive lookups
-    trend_units = {
-        TrendName.HUMIDITY: DEFAULT_TRENDS[TrendName.HUMIDITY].trend(zone).unit,
-        TrendName.TEMPERATURE: "°C" if metric else "°F",
-        TrendName.PH: DEFAULT_TRENDS[TrendName.PH].trend(zone).unit,
-        TrendName.ELECTRICAL_CONDUCTIVITY: DEFAULT_TRENDS[TrendName.ELECTRICAL_CONDUCTIVITY].trend(zone).unit,
-        TrendName.SALINITY: DEFAULT_TRENDS[TrendName.SALINITY].trend(zone).unit,
-        TrendName.TOTAL_DISSOLVED_SOLIDS: DEFAULT_TRENDS[TrendName.TOTAL_DISSOLVED_SOLIDS].trend(zone).unit
-    }
-    # Batch record measurements using a list of tuples
-    measurements = [
-        (TrendName.HUMIDITY, rh),
-        (TrendName.TEMPERATURE, temp),
-        (TrendName.PH, ph),
-        (TrendName.ELECTRICAL_CONDUCTIVITY, ec),
-        (TrendName.SALINITY, sal),
-        (TrendName.TOTAL_DISSOLVED_SOLIDS, tds)
-    ]
-    # Record all measurements in a single loop
-    tstamp = _now_local()
-    for trend_name, value in measurements:
-        record_measurement(trend_name, zone, Measurement(tstamp, value, trend_units[trend_name]))
+    # write all in a short autocommit burst
+    record_measurement(TrendName.HUMIDITY, zone, rh)
+    record_measurement(TrendName.TEMPERATURE, zone, temp, Unit.CELSIUS if metric else Unit.FAHRENHEIT)
+    record_measurement(TrendName.PH, zone, ph)
+    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, ec)
+    record_measurement(TrendName.SALINITY, zone, sal)
+    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, tds)
 
-def record_npk(zone: str, n: int, p: int, k: int):
-    """
-    Records nitrogen (N), phosphorus (P), and potassium (K) measurements for a specific zone.
-
-    This function handles the recording of nutrient measurements across different
-    zones. It leverages the `record_measurement` function to log data for nitrogen,
-    phosphorus, and potassium separately.
-
-    :param zone: The identification of the zone for which the measurements are recorded.
-    :type zone: str
-    :param n: The nitrogen value to be recorded.
-    :type n: int
-    :param p: The phosphorus value to be recorded.
-    :type p: int
-    :param k: The potassium value to be recorded.
-    :type k: int
-    :return: None
-    """
-    tstamp = _now_local()
-    record_measurement(TrendName.NITROGEN, zone, Measurement(tstamp, n, DEFAULT_TRENDS[TrendName.NITROGEN].trend(zone).unit))
-    record_measurement(TrendName.PHOSPHORUS, zone, Measurement(tstamp, p, DEFAULT_TRENDS[TrendName.PHOSPHORUS].trend(zone).unit))
-    record_measurement(TrendName.POTASSIUM, zone, Measurement(tstamp, k, DEFAULT_TRENDS[TrendName.POTASSIUM].trend(zone).unit))
+def record_npk(zone: str, n: Measurement, p: Measurement, k: Measurement):
+    record_measurement(TrendName.NITROGEN, zone, n)
+    record_measurement(TrendName.PHOSPHORUS, zone, p)
+    record_measurement(TrendName.POTASSIUM, zone, k)
 
 def record_watering(zone: str, measurement: WateringMeasurement):
     """
-    Records the amount of water for a specific zone. This function registers the water
-    measurement data into the system for further analysis or monitoring.
-
-    :param zone: The designated zone where the water measurement should be recorded.
-    :type zone: str
-    :param measurement: The water measurement to be recorded.
-    :type measurement: WateringMeasurement
-    :return: None
+    Stores the watering amount under the 'water' trend. Extra fields like humidity_start/end
+    and duration are currently not persisted in this simplified schema.
     """
     record_measurement(TrendName.WATER, zone, measurement)
+
+def record_weather(weather_data: list[WeatherData]):
+    """
+    Records weather data into a database.
+
+    This function takes a list of weather data and stores the relevant information
+    to a database. It includes details about the current conditions and forecasts,
+    such as temperature, precipitation, soil moisture, and surface pressure.
+
+    :param weather_data: A list of WeatherData objects containing the weather details to be recorded.
+    :type weather_data: list[WeatherData]
+    :return: None
+    """
+    with db() as conn:
+        cur = conn.cursor()
+        # current conditions
+        now = datetime.now(UTC).timestamp() * 1000
+        for wd in weather_data:
+            cur.execute("""
+              INSERT OR REPLACE INTO weather(collected_at_utc, forecast_ts_utc, tz, tag, temperature_2m, temperature_unit, precipitation_probability, precipitation, precipitation_unit, soil_moisture_1_to_3cm, moisture_unit, surface_pressure, pressure_unit)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (now, wd.timestamp.timestamp() * 1000, str(wd.timestamp.tzinfo),
+                  wd.tag, wd.temperature.value, wd.temperature.unit, wd.precipitation_prob.value if wd.precipitation_prob else None,
+                  wd.precipitation_amount.value, wd.precipitation_amount.unit, wd.soil_humidity.value, wd.soil_humidity.unit,
+                  wd.surface_pressure.value if wd.surface_pressure else None, wd.surface_pressure.unit if wd.surface_pressure else None))
+        conn.commit()
+
+def get_weather_data(from_ts: datetime, count: int) -> list[WeatherData]:
+    """
+    Retrieves weather forecast data either in forward or reverse temporal order based on the
+    provided time.
+
+    It excludes the records with null precipitation probability - those are records of current conditions that
+    do not include forecasted precipitation probability.
+
+    :param from_ts: The reference datetime from which the weather data should be fetched.
+    :param count: The number of weather records to retrieve. A positive value fetches
+        records moving forward in time. A negative value fetches records moving backward in time.
+    :return: A list containing weather data entries encapsulated in `WeatherData` objects.
+    """
+    with db() as conn:
+        cur = conn.cursor()
+        how_many:int = abs(count)
+        forward:bool = count > 0
+        if forward:
+            cur.execute("""
+              SELECT collected_at_utc, forecast_ts_utc, tz, tag, temperature_2m, temperature_unit, soil_moisture_1_to_3cm, moisture_unit, precipitation, precipitation_unit, precipitation_probability, surface_pressure, pressure_unit
+                FROM weather
+               WHERE forecast_ts_utc >= ? and precipitation_probability is not null
+            ORDER BY forecast_ts_utc
+               LIMIT ?
+            """, (from_ts.timestamp() * 1000, how_many))
+        else:
+            cur.execute("""
+              SELECT collected_at_utc, forecast_ts_utc, tz, tag, temperature_2m, temperature_unit, soil_moisture_1_to_3cm, moisture_unit, precipitation, precipitation_unit, precipitation_probability, surface_pressure, pressure_unit
+                FROM weather
+               WHERE forecast_ts_utc <= ? and precipitation_probability is not null
+            ORDER BY forecast_ts_utc DESC
+               LIMIT ?
+            """, (from_ts.timestamp() * 1000, how_many))
+        rows = cur.fetchall()
+        wdata:list = []
+        for row in rows:
+            # Build localized timestamp, then use a factory for clarity.
+            localized_ts = datetime.fromtimestamp(row[1] / 1000, valid_timezone(row[2]))
+            wdata.append(WeatherData.from_db_row((localized_ts, *row[3:])))
+        return wdata

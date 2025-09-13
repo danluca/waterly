@@ -9,9 +9,13 @@ import threading
 
 from enum import Enum
 from typing import Any
-from datetime import datetime
+from datetime import datetime, UTC
 from .times import _json_datetime_encoder, _json_datetime_decoder
 from ..model.trend import *     # needed to have available all model objects in the global scope
+from ..model.times import *     # needed to have available all model objects in the global scope
+from ..model.units import *     # needed to have available all model objects in the global scope
+from ..model.weather_data import *     # needed to have available all model objects in the global scope
+from ..model.zone import *     # needed to have available all model objects in the global scope
 from ..model.measurement import *
 
 
@@ -83,6 +87,30 @@ def _json_object_hook(obj: dict) -> Any:
     return obj
 
 #</editor-fold>
+
+def write_text_file(path: str, content: str) -> None:
+    """
+    Write the given text to 'path', overwriting if it exists.
+    Uses a temporary file + atomic replace to avoid partial writes.
+    Creates parent directories if they don't exist.
+    """
+    # Ensure parent directory exists
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        # Atomic on POSIX; safe overwrite on Windows
+        os.replace(tmp_path, path)
+    finally:
+        # Best-effort cleanup if something went wrong before replace
+        # noinspection PyBroadException
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 
 class ThreadSafeJSON:
@@ -171,3 +199,74 @@ class ThreadSafeJSON:
             updated = updater(data)
             self._write(updated)
             return updated
+
+
+class RollingThreadSafeJSON(ThreadSafeJSON):
+    """
+    Provides a rolling mechanism for JSON data that allows safe updates across threads
+    while dynamically updating file paths based on the current year.
+
+    This class extends the functionality of ThreadSafeJSON to automatically adapt the
+    storage path of JSON files according to the current year. It enforces the presence
+    of a '%YEAR%' placeholder in the given path and resolves it during file operations.
+
+    :ivar path: The file path template containing the '%YEAR%' placeholder.
+    :type path: str
+    :ivar default: The default data to use if the JSON file does not exist.
+    :type default: Any
+    """
+
+    def __init__(self, path: str, default: Any):
+        self._pathPattern = path
+        if ("%YEAR%" not in self._pathPattern) and ("%MONTH%" not in self._pathPattern):
+            raise ValueError("Path pattern must contain both %YEAR% and %MONTH% placeholders")
+        # Initialize base with the resolved current-year path; the file is created at the correct location immediately
+        super().__init__(self.get_current_file_path(), default)
+
+    def get_current_file_path(self) -> str:
+        """
+        Gets the current file path with the placeholder for the year replaced by
+        the current year.
+
+        This method replaces the "%YEAR%" keyword in the file path with the actual
+        current year retrieved via a helper function.
+
+        :return: The updated file path with the year properly replaced.
+        :rtype: str
+        """
+        dt = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
+        return self._pathPattern.replace("%YEAR%", dt.strftime("%Y")).replace("%MONTH%", dt.strftime("%m_%b"))
+
+    def read(self) -> Any:
+        """
+        Reads data using the current file path through the parent `read` method.
+
+        Updates the instance's file path based on the current year, then calls and
+        returns data from the parent read operation. When the year advances, a new
+        file is created with default content.
+
+        :return: Data read from the file
+        :rtype: Any
+        """
+        self.path = self.get_current_file_path()
+        return super().read()
+
+    def update(self, updater):
+        """
+        Updates the current file path and invokes the parent class update method.
+
+        :param updater: The object used to perform the update operation.
+        :return: The result of the update operation from the parent class method.
+        """
+        self.path = self.get_current_file_path()
+        return super().update(updater)
+
+
+def _now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def _now_utc_str() -> str:
+    return datetime.now(UTC).replace(tzinfo=None).isoformat(timespec='milliseconds') + "Z"
+
+

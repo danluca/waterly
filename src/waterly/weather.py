@@ -10,76 +10,16 @@ import requests
 
 from datetime import datetime, timedelta, tzinfo
 from typing import Optional
-from .config import DEFAULT_TIMEZONE, DATA_DIR, CONFIG, Settings, UnitType
+from .config import DATA_DIR, CONFIG, Settings
 from .model.measurement import convert_measurement
-from .storage import write_text_file
+from .model.times import valid_timezone
+from .model.weather_data import WeatherData
+from .model.units import Unit, UnitType
+from .storage import record_weather, get_weather_data
+from .json.serialization import write_text_file
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 
-class WeatherData:
-    """
-    Represents weather data for a specific timestamp.
-
-    This class encapsulates weather-related metrics such as temperature, soil
-    humidity, and precipitation for a given timestamp. It is designed to model
-    weather data efficiently, allowing access to these metrics through properties.
-
-    :ivar _timestamp: The timestamp associated with the weather data.
-    :type _timestamp: datetime
-    :ivar _temperature: The temperature recorded at the given timestamp.
-    :type _temperature: float
-    :ivar _temperature_unit: The unit of temperature measurement.
-    :type _temperature_unit: str
-    :ivar _soil_humidity: Soil humidity expressed as a percentage (m³/m³).
-    :type _soil_humidity: float
-    :ivar _precipitation_amount: Precipitation amount at the given timestamp.
-    :type _precipitation_amount: float
-    :ivar _precipitation_unit: The unit of precipitation measurement.
-    :type _precipitation_unit: str
-    :ivar _precipitation_prob: Probability of precipitation at the given timestamp.
-    :type _precipitation_prob: float
-    """
-    def __init__(self, timestamp: datetime, temperature: float, temperature_unit: str, soil_humidity: float, precipitation_amount: float, precipitation_unit: str, precipitation_prob: float):
-        self._timestamp = timestamp # local time
-        self._temperature = temperature # in current units, 'C or 'F
-        self._temperature_unit = temperature_unit
-        self._soil_humidity = soil_humidity # in m3/m3 (percentage)
-        self._precipitation_amount = precipitation_amount # in current units, mm or inch
-        self._precipitation_unit = precipitation_unit
-        self._precipitation_prob = precipitation_prob   # percentage
-
-    @property
-    def timestamp(self) -> datetime:
-        return self._timestamp
-
-    @property
-    def temperature(self) -> float:
-        return self._temperature
-
-    @property
-    def soil_humidity(self) -> float:
-        return self._soil_humidity
-
-    @property
-    def precipitation_amount(self) -> float:
-        return self._precipitation_amount
-
-    @property
-    def precipitation_prob(self) -> float:
-        return self._precipitation_prob
-
-    @property
-    def temperature_unit(self) -> str:
-        return self._temperature_unit
-
-    @property
-    def precipitation_unit(self) -> str:
-        return self._precipitation_unit
-
-    def __str__(self):
-        return f"WeatherData[timestamp={self._timestamp}, temperature={self._temperature} {self._temperature_unit}, soil_humidity={self._soil_humidity}, precipitation_amount={self._precipitation_amount} {self._precipitation_unit}, precipitation_prob={self._precipitation_prob}]"
-    def __repr__(self):
-        return self.__str__()
 
 class WeatherService:
     """
@@ -102,12 +42,11 @@ class WeatherService:
 
     def __init__(self):
         self._lock = threading.RLock()
-        self._weather_data: list[WeatherData] = []  # 48 hours worth of data, 24 hours past and 24 hours future
         self._forecast_days: int = 3    # hardcoded for now using a common sense value
         self._past_days: int = 1        # number of past days to consider for weather data
         self._timezone: pytz.BaseTzInfo = CONFIG[Settings.LOCAL_TIMEZONE]
         self._last_update: Optional[datetime] = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
-        self._update_offset_from_watering_time: int = CONFIG[Settings.WEATHER_CHECK_OFFSET_FROM_WATERING_SECONDS]
+        self._pre_watering_update_offset: int = CONFIG[Settings.WEATHER_CHECK_PRE_WATERING_SECONDS]
         self._precip_prob_threshold: float = CONFIG[Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD]
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="WeatherService", daemon=True)
@@ -122,7 +61,6 @@ class WeatherService:
         in a separate execution flow.
 
         """
-        # TODO: read last saved weather data, if any
         self._thread.start()
 
     def stop(self):
@@ -142,43 +80,40 @@ class WeatherService:
         Determines whether it is recommended to water the garden based on the current and past weather data
 
         It is recommended for a garden to receive about 1.5 inches of rain per week. This translates to ~ 0.1 inch per
-        12-hour interval. Therefore,the algorithm we use returns false when either of the following conditions are met:
+        12-hour interval. Therefore, the algorithm we use returns false when either of the following conditions are met:
          - the past 12 hours have had more than 0.1 inch of rain
          - the next 12-hour rain probability is more than 50% and the amount of rain over 0.1 inch
         Otherwise, it returns true - the garden should be watered.
         :return: True if it is recommended to water the garden, False otherwise.
         :rtype: bool
         """
-        if not self._weather_data:
-            self._logger.info("Weather Data assessment: data not available yet - defaulting to enable watering.")
-            return True
         now = datetime.now(self._timezone)
+        past_12h_data = get_weather_data(now, -12)
+        next_12h_data = get_weather_data(now, 12)
+        if not next_12h_data:
+            self._logger.info("Weather Data assessment: forecast data not available yet - defaulting to enable watering.")
+            return True
         past_12h_rain = 0.0
         past_12h_soil_humidity = 0.0
         next_12h_prob = 0.0
         next_12h_rain = 0.0
         next_12h_soil_humidity = 0.0
-        horizon_from = now - timedelta(hours=12)
-        horizon_to = now + timedelta(hours=12)
-        past_data_points = 0    # hourly data points
-        future_data_points = 0  # hourly data points, should have a minimum of 6
-        for w in self._weather_data:
-            if now > w.timestamp >= horizon_from:
-                past_12h_rain += w.precipitation_amount
-                past_12h_soil_humidity += w.soil_humidity
-                past_data_points += 1
-            if horizon_to <= w.timestamp < now:
-                next_12h_prob = max(next_12h_prob, w.precipitation_prob)
-                next_12h_rain += w.precipitation_amount
-                next_12h_soil_humidity += w.soil_humidity
-                future_data_points += 1
-        precip_unit: str = self._weather_data[-1].precipitation_unit
+        past_data_points = len(past_12h_data)    # hourly data points
+        future_data_points = len(next_12h_data)  # hourly data points, should have a minimum of 6
+        for w in next_12h_data:
+            past_12h_rain += w.precipitation_amount.value
+            past_12h_soil_humidity += w.soil_humidity.value
+        for w in past_12h_data:
+            next_12h_prob = max(next_12h_prob, w.precipitation_prob.value)
+            next_12h_rain += w.precipitation_amount.value
+            next_12h_soil_humidity += w.soil_humidity.value
+        precip_unit: Unit = next_12h_data[-1].precipitation_amount.unit
         self._logger.info(f"Weather Data points: Past 12h: {past_data_points}, Future 12h: {future_data_points}")
         self._logger.info(f"Weather Data assessment: Past 12h rain: {past_12h_rain:.2f} {precip_unit}, Future 12h rain: {next_12h_rain:.2f} {precip_unit} with {next_12h_prob:.2f}% chance")
         past_12h_soil_humidity /= past_data_points if past_data_points > 0 else 1.0
         next_12h_soil_humidity /= future_data_points if future_data_points > 0 else 1.0
         self._logger.info(f"Weather Data assessment: Past 12h average soil humidity: {past_12h_soil_humidity*100.0:.2f}%, Future 12h average soil humidity: {next_12h_soil_humidity*100.0:.2f}%")
-        rain_12_threshold = convert_measurement(self.RAIN_12H_THRESHOLD_INCHES, "inch", precip_unit)
+        rain_12_threshold = convert_measurement(self.RAIN_12H_THRESHOLD_INCHES, Unit.INCHES, precip_unit)
         should_not_water = past_12h_rain > rain_12_threshold or (next_12h_prob > self._precip_prob_threshold and next_12h_rain > rain_12_threshold)
         return (not should_not_water) or future_data_points < 6
 
@@ -245,13 +180,12 @@ class WeatherService:
                 watering_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
                 if watering_time < now:
                     watering_time += timedelta(days=1)
-                time_until_watering: int = int((watering_time - now).total_seconds())
 
                 # Define the pre-watering window [window_start, watering_time)
-                window_start = watering_time - timedelta(seconds=self._update_offset_from_watering_time)
+                window_start = watering_time - timedelta(seconds=self._pre_watering_update_offset)
 
                 # Determine wait time and whether to perform an update based on window
-                pre_m, pre_s = divmod(self._update_offset_from_watering_time, 60)
+                pre_m, pre_s = divmod(self._pre_watering_update_offset, 60)
                 weather_check_done:bool = False
                 if now < window_start:
                     # BEFORE pre-watering window: run at regular interval, but don't overshoot the window start
@@ -306,8 +240,8 @@ class WeatherService:
         """
         metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
         params = {
-            "latitude": CONFIG[Settings.LATITUDE],
-            "longitude": CONFIG[Settings.LONGITUDE],
+            "latitude": CONFIG[Settings.LOCATION]["latitude"],
+            "longitude": CONFIG[Settings.LOCATION]["longitude"],
             "hourly": "precipitation_probability,temperature_2m,precipitation,soil_moisture_1_to_3cm",
             "forecast_days": self._forecast_days,
             "past_days": self._past_days,
@@ -316,32 +250,33 @@ class WeatherService:
             "precipitation_unit": "mm" if metric else "inch",
             "timezone": "auto"  # Open-Meteo can auto-detect by coordinates
         }
-        result:bool = False
         try:
             r = requests.get(OPEN_METEO_URL, params=params, timeout=20)
             r.raise_for_status()
-            self._save_weather_data(r.text)
             data = r.json()
-            hourly = data.get("hourly", {})
-            hourly_units = data.get("hourly_units", {})
+            self._save_weather_data(r.text)
+            # determine local timezone
+            self._timezone = valid_timezone(data.get("timezone", "UTC"))
+            now = datetime.now(self._timezone)
+            # current conditions
             current = data.get("current", {})
             current_units = data.get("current_units", {})
+            cur_ts = self._timezone.localize(datetime.fromisoformat(current.get("time").replace("Z", "+00:00")).replace(tzinfo=None))
+            cur_weather = WeatherData.from_api_current(cur_ts, current, current_units)
+            # hourly forecast data
+            hourly = data.get("hourly", {})
+            hourly_units = data.get("hourly_units", {})
             probs = hourly.get("precipitation_probability", [])
             soil = hourly.get("soil_moisture_1_to_3cm", [])
             precip = hourly.get("precipitation", [])
             temps = hourly.get("temperature_2m", [])
             times = hourly.get("time", [])
-            # determine local timezone
-            try:
-                self._timezone = pytz.timezone(data.get("timezone", "UTC"))
-            except pytz.UnknownTimeZoneError:
-                self._timezone = DEFAULT_TIMEZONE
-                self._logger.warning(f"Invalid timezone '{data.get('timezone', 'UTC')}' for pytz/TZDB version {pytz.VERSION}. Using default timezone {DEFAULT_TIMEZONE} instead.")
 
-            now = datetime.now(self._timezone)
             horizon_from = now - timedelta(hours=24)
             horizon_to = now + timedelta(hours=24)
+
             wdata: list[WeatherData] = []
+            merged_current = False
             for t, p, s, r, deg in zip(times, probs, soil, precip, temps):
                 # noinspection PyBroadException
                 try:
@@ -349,7 +284,15 @@ class WeatherService:
                 except Exception:
                     continue
                 if horizon_from <= ts <= horizon_to:
-                    wdata.append(WeatherData(ts, deg, hourly_units["temperature_2m"], s, r, hourly_units["precipitation"], p / 100.0))
+                    if ts == cur_ts:
+                        merged_current = True
+                        wdata.append(WeatherData.from_api_hourly(ts, t, deg, s, r, p, hourly_units, cur_weather.surface_pressure))
+                    else:
+                        wdata.append(WeatherData.from_api_hourly(ts, t, deg, s, r, p, hourly_units))
+            if not merged_current:
+                wdata.append(cur_weather)
+            record_weather(wdata)
+
             # for previous 12h determine the amount of rain and for next 12 hours probability of rain and amount of rain
             past_12h_rain = 0.0
             next_12h_prob = 0.0
@@ -358,12 +301,11 @@ class WeatherService:
             horizon_to = now + timedelta(hours=12)
             for w in wdata:
                 if now > w.timestamp >= horizon_from:
-                    past_12h_rain += w.precipitation_amount
+                    past_12h_rain += w.precipitation_amount.value
                 if horizon_to <= w.timestamp < now:
-                    next_12h_prob = max(next_12h_prob, w.precipitation_prob)
-                    next_12h_rain += w.precipitation_amount
+                    next_12h_prob = max(next_12h_prob, w.precipitation_prob.value)
+                    next_12h_rain += w.precipitation_amount.value
             with self._lock:
-                self._weather_data = wdata
                 self._last_update = now
                 CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP] = now
             result = True

@@ -18,15 +18,10 @@ def _json_datetime_encoder(dt:datetime) -> dict[str, str]:
     :return: A dictionary containing the encoded datetime data with keys "__type__", "iso", and "tz".
     :rtype: dict[str, str]
     """
-    stz = None
-    if isinstance(dt.tzinfo, pytz.BaseTzInfo):
-        stz = dt.tzinfo.zone
-    elif dt.tzinfo:
-        stz = dt.tzinfo.tzname(dt)
     return {
         "__type__": "datetime",
         "iso": dt.isoformat(),
-        "tz": stz,
+        "tz": str(dt.tzinfo)
     }
 
 def _json_datetime_decoder(obj:dict[str, str]) -> datetime | dict[str, str]:

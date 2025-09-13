@@ -3,7 +3,32 @@
 #  Copyright (c) 2025 by Dan Luca. All rights reserved.
 #
 
-from .measurement import Measurement, convert_measurement
+from enum import StrEnum
+from .measurement import Measurement
+from .units import Unit
+
+class TrendName(StrEnum):
+    """
+    Enumeration for trend names in various environmental and measurement parameters.
+
+    This enumeration defines constants representing different types of environmental
+    and chemical trends such as humidity, temperature, and salinity, among others.
+    Each value is represented as a string constant, which can be used to denote
+    specific types of monitored or measured trends in applications.
+
+    """
+    HUMIDITY = "humidity"
+    TEMPERATURE = "temperature"
+    PH = "ph"
+    ELECTRICAL_CONDUCTIVITY = "ec"
+    SALINITY = "salinity"
+    TOTAL_DISSOLVED_SOLIDS = "tds"
+    NITROGEN = "nitrogen"
+    PHOSPHORUS = "phosphorus"
+    POTASSIUM = "potassium"
+    WATER = "water"
+    RPI_TEMPERATURE = "rpitemp"
+
 
 class Trend:
     """
@@ -23,7 +48,7 @@ class Trend:
     :ivar maxSamples: Maximum number of samples the trend can hold.
     :type maxSamples: int
     """
-    def __init__(self, name: str, unit: str, max_samples: int = 5000):
+    def __init__(self, name: str, unit: Unit, max_samples: int = 5000):
         """
         Initializes a new instance of the class with the provided name, unit, and optional
         maximum number of samples. The data list is initialized as an empty collection to
@@ -32,13 +57,13 @@ class Trend:
         :param name: The identifier or title associated with the instance.
         :type name: str
         :param unit: The unit of measurement related to the data values.
-        :type unit: str
+        :type unit: Unit
         :param max_samples: Optional maximum number of samples that can be stored. Defaults
                             to 5000 if not provided.
         :type max_samples: int
         """
         self.name: str = name
-        self.unit: str = unit
+        self.unit: Unit = unit
         self.data: list[Measurement] = []
         self.maxSamples = max_samples
 
@@ -121,7 +146,7 @@ class Trend:
     def json_decode(obj):
         if "__type__" in obj and obj["__type__"] == "Trend":
             name = obj.get("name")
-            unit = obj.get("unit")
+            unit = Unit(obj.get("unit"))
             max_samples = obj.get("maxSamples")
             data = obj.get("data")
             t = Trend(name, unit, max_samples)
@@ -146,7 +171,7 @@ class TrendSet:
         corresponding `Trend` objects.
     :type trends: Dict[str, Trend]
     """
-    def __init__(self, zone: list[str], name: str, unit: str, max_samples: int = 5000):
+    def __init__(self, zone: list[str], name: str, unit: Unit, max_samples: int = 5000):
         """
         Initializes a collection of trends, each associated with a specific zone. The trends are used to track
         a specified metric within those zones, allowing for consistent monitoring and sampling. A maximum
@@ -157,7 +182,7 @@ class TrendSet:
         :param name: The name of the metric being tracked for each trend.
         :type name: str
         :param unit: The unit of the metric being measured.
-        :type unit: str
+        :type unit: Unit
         :param max_samples: The maximum number of samples to be held per trend. Defaults to 5000.
         :type max_samples: int
         """
@@ -225,7 +250,6 @@ class TrendSet:
         :type zone: str
         :param func: A function that modifies the current data for the specified zone.
         :return: None
-        :rtype: None
         """
         func(self.trends[zone].data)
 
@@ -256,7 +280,7 @@ class TrendSet:
         if "__type__" in obj and obj["__type__"] == "TrendSet":
             name = obj.get("name")
             trends = obj.get("trends")
-            t = TrendSet([], name, "")
+            t = TrendSet(list(trends.keys()), name, list(trends.values())[0].unit)
             t.trends = trends
             return t
         return None

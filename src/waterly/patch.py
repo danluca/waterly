@@ -8,10 +8,13 @@ from typing import Optional
 from gpiozero import OutputDevice
 from time import sleep
 
+from .model.measurement import Measurement
 from .model.zone import Zone
+from .model.times import now_local
+from .model.units import Unit
 from .dfrobot import SEN0604, SEN0605
 from .storage import TrendName
-from .config import CONFIG, Settings, UnitType
+from .config import CONFIG, Settings
 
 def convert_celsius_fahrenheit(celsius: float) -> float:
     """
@@ -63,7 +66,7 @@ class Patch:
         self.min_sensor_humidity: float = CONFIG[Settings.MINIMUM_SENSOR_HUMIDITY_PERCENT][self.zone.name]
         self.target_humidity: float = CONFIG[Settings.HUMIDITY_TARGET_PERCENT][self.zone.name]
         self._logger = logging.getLogger(__name__)
-        self._last_humidity_reading: float = 0.0
+        self._last_humidity_reading: Optional[Measurement] = None
 
     @property
     def name(self) -> str:
@@ -106,7 +109,7 @@ class Patch:
         return self.relay_device.value
 
     @property
-    def current_humidity(self) -> float:
+    def current_humidity(self) -> Optional[Measurement]:
         """
         Gets the most recent humidity reading.
 
@@ -190,34 +193,32 @@ class Patch:
         self.rh_sensor.close() if self.has_rh_sensor else None
         self.npk_sensor.close() if self.has_npk_sensor else None
 
-    def humidity(self) -> float|None:
+    def humidity(self) -> Optional[Measurement]:
         """
         Reads and returns the relative humidity measured by the sensor in percentages.
 
         :return: The relative humidity as a float.
-        :rtype: float
+        :rtype: Measurement|None
         """
         moisture = self.rh_sensor.read_moisture() if self.has_rh_sensor and self.rh_sensor.is_open else None
         if moisture is not None:
-            self._last_humidity_reading = moisture
-            return moisture
+            humid = Measurement(moisture, Unit.PERCENT, now_local())
+            self._last_humidity_reading = humid
+            return humid
         return None
 
-    def temperature(self, iso: bool = False) -> float | None:
+    def temperature(self) -> Optional[Measurement]:
         """
-        Fetches the current temperature read by the sensor, either in Celsius or Fahrenheit degrees based on
-        the input parameter. Defaults to Fahrenheit.
+        Fetches the current temperature read by the sensor, in Celsius
 
-        :param iso: Determines the unit system for the temperature. When `True`, the temperature is returned in Celsius.
-         When `False`, the temperature is returned in Fahrenheit.
         :return: The current temperature as reported by the sensor.
-        :rtype: float
+        :rtype: Measurement|None
         """
         if not (self.has_rh_sensor and self.rh_sensor.is_open):
             return None
-        return self.rh_sensor.read_temperature_c() if iso else self.rh_sensor.read_temperature_f()
+        return Measurement(self.rh_sensor.read_temperature_c(), Unit.CELSIUS, now_local())
 
-    def electric_conductivity(self) -> int:
+    def electric_conductivity(self) -> Optional[Measurement]:
         """
         Reads the electric conductivity using the RH sensor.
 
@@ -226,11 +227,13 @@ class Patch:
         applications such as water quality assessment or other environmental analysis tasks.
 
         :return: The electric conductivity value measured by the RH sensor.
-        :rtype: int
+        :rtype: Measurement
         """
-        return self.rh_sensor.read_ec() if self.has_rh_sensor and self.rh_sensor.is_open else None
+        if not (self.has_rh_sensor and self.rh_sensor.is_open):
+            return None
+        return Measurement(self.rh_sensor.read_ec(), Unit.CONDUCTIVITY, now_local())
 
-    def ph(self) -> float:
+    def ph(self) -> Optional[Measurement]:
         """
         Reads the pH value from the connected sensor.
 
@@ -238,22 +241,26 @@ class Patch:
         is current and accurately reflects the sensor's state.
 
         :return: The pH value measured by the sensor.
-        :rtype: float
+        :rtype: Measurement|None
         """
-        return self.rh_sensor.read_ph() if self.has_rh_sensor and self.rh_sensor.is_open else None
+        if not (self.has_rh_sensor and self.rh_sensor.is_open):
+            return None
+        return Measurement(self.rh_sensor.read_ph(), Unit.PH, now_local())
 
-    def salinity(self) -> int:
+    def salinity(self) -> Optional[Measurement]:
         """
         Reads and returns the salinity value from the RH sensor.
 
         This method interacts with the RH sensor to retrieve the salinity measurement.
 
-        :return: The salinity value as an integer.
-        :rtype: int
+        :return: The salinity value as an integer ppt.
+        :rtype: Measurement|None
         """
-        return self.rh_sensor.read_salinity() if self.has_rh_sensor and self.rh_sensor.is_open else None
+        if not (self.has_rh_sensor and self.rh_sensor.is_open):
+            return None
+        return Measurement(self.rh_sensor.read_salinity(), Unit.PPT, now_local())
 
-    def total_dissolved_solids(self) -> int:
+    def total_dissolved_solids(self) -> Optional[Measurement]:
         """
         Calculates and retrieves the total dissolved solids (TDS) value.
 
@@ -261,11 +268,13 @@ class Patch:
         amount of dissolved substances in water or other liquids, providing a concise indication of water quality.
 
         :return: Total dissolved solids (TDS) value as an integer.
-        :rtype: int
+        :rtype: Measurement|None
         """
-        return self.rh_sensor.read_tds() if self.has_rh_sensor and self.rh_sensor.is_open else None
+        if not (self.has_rh_sensor and self.rh_sensor.is_open):
+            return None
+        return Measurement(self.rh_sensor.read_tds(), Unit.PPM, now_local())
 
-    def nitrogen(self) -> int | None:
+    def nitrogen(self) -> Optional[Measurement]:
         """
         Reads the nitrogen level from the NPK sensor.
 
@@ -273,11 +282,13 @@ class Patch:
         It returns the nitrogen value as an integer in mg/kg unit.
 
         :return: The nitrogen level as an integer from the sensor.
-        :rtype: int
+        :rtype: Measurement|None
         """
-        return self.npk_sensor.read_nitrogen() if self.has_npk_sensor and self.npk_sensor.is_open else None
+        if not (self.has_npk_sensor and self.npk_sensor.is_open):
+            return None
+        return Measurement(self.npk_sensor.read_nitrogen(), Unit.MG_PER_KG, now_local())
 
-    def phosphorus(self) -> int | None:
+    def phosphorus(self) -> Optional[Measurement]:
         """
         Reads the phosphorus level from the NPK sensor.
 
@@ -285,11 +296,13 @@ class Patch:
         returns it as an integer value in mg/kg unit.
 
         :return: The phosphorus level as detected by the NPK sensor.
-        :rtype: int
+        :rtype: Measurement|None
         """
-        return self.npk_sensor.read_phosphorus() if self.has_npk_sensor and self.npk_sensor.is_open else None
+        if not (self.has_npk_sensor and self.npk_sensor.is_open):
+            return None
+        return Measurement(self.npk_sensor.read_phosphorus(), Unit.MG_PER_KG, now_local())
 
-    def potassium(self) -> int | None:
+    def potassium(self) -> Optional[Measurement]:
         """
         Reads the potassium level from the NPK sensor.
 
@@ -297,11 +310,13 @@ class Patch:
         returns it as an integer value in mg/kg unit.
 
         :return: The potassium level as detected by the NPK sensor.
-        :rtype: int
+        :rtype: Measurement|None
         """
-        return self.npk_sensor.read_potassium() if self.has_npk_sensor and self.npk_sensor.is_open else None
+        if not (self.has_npk_sensor and self.npk_sensor.is_open):
+            return None
+        return Measurement(self.npk_sensor.read_potassium(), Unit.MG_PER_KG, now_local())
 
-    def measurements(self) -> dict[TrendName, float|int|None]:
+    def measurements(self) -> dict[TrendName, Measurement]:
         """
         Convenience method to retrieve all measurements from the sensors.
 
@@ -309,29 +324,27 @@ class Patch:
         it will also include the measurements from the NPK sensor; otherwise, only the measurements from the RH sensor are returned.
         Note the temperature measurement is returned in Celsius.
 
-        :return: A tuple containing the measurements from the sensors: either (temperature, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium) or (temperature, humidity, ec, ph, salinity, tds)
-        :rtype: tuple[float, float, int, float, int, int] | tuple[float, float, int, float, int, int, int, int, int]
+        :return: A map containing the measurements from the sensors
+        :rtype: dict[TrendName, Measurement]
         """
-        readings: dict[TrendName, float|int|None] = {}
+        readings: dict[TrendName, Measurement] = {}
+        now = now_local()
         if self.has_rh_sensor and self.rh_sensor.is_open:
-            metric:bool = CONFIG[Settings.UNITS] == UnitType.METRIC
             rh_all = self.rh_sensor.read_all()
-            readings[TrendName.TEMPERATURE] = rh_all[SEN0604.ReadingType.TEMPERATURE]
-            if not metric:
-                readings[TrendName.TEMPERATURE] = convert_celsius_fahrenheit(readings[TrendName.TEMPERATURE])
-            readings[TrendName.HUMIDITY] = rh_all[SEN0604.ReadingType.MOISTURE]
+            readings[TrendName.TEMPERATURE] = Measurement(rh_all[SEN0604.ReadingType.TEMPERATURE], Unit.CELSIUS, now)
+            readings[TrendName.HUMIDITY] = Measurement(rh_all[SEN0604.ReadingType.MOISTURE], Unit.PERCENT, now)
             self._last_humidity_reading = readings[TrendName.HUMIDITY]
-            readings[TrendName.ELECTRICAL_CONDUCTIVITY] = rh_all[SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY]
-            readings[TrendName.PH] = rh_all[SEN0604.ReadingType.PH]
-            readings[TrendName.SALINITY] = rh_all[SEN0604.ReadingType.SALINITY]
-            readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = rh_all[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS]
+            readings[TrendName.ELECTRICAL_CONDUCTIVITY] = Measurement(rh_all[SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY], Unit.CONDUCTIVITY, now)
+            readings[TrendName.PH] = Measurement(rh_all[SEN0604.ReadingType.PH], Unit.PH, now)
+            readings[TrendName.SALINITY] = Measurement(rh_all[SEN0604.ReadingType.SALINITY], Unit.PPT, now)
+            readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = Measurement(rh_all[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS], Unit.PPM, now)
         # both sensors are on the same serial port (RS485)
         if self.has_npk_sensor and self.npk_sensor.is_open:
             sleep(0.25)
             npk_all = self.npk_sensor.read_all()
-            readings[TrendName.NITROGEN] = npk_all[SEN0605.ReadingType.NITROGEN]
-            readings[TrendName.PHOSPHORUS] = npk_all[SEN0605.ReadingType.PHOSPHORUS]
-            readings[TrendName.POTASSIUM] = npk_all[SEN0605.ReadingType.POTASSIUM]
+            readings[TrendName.NITROGEN] = Measurement(npk_all[SEN0605.ReadingType.NITROGEN], Unit.MG_PER_KG, now)
+            readings[TrendName.PHOSPHORUS] = Measurement(npk_all[SEN0605.ReadingType.PHOSPHORUS], Unit.MG_PER_KG, now)
+            readings[TrendName.POTASSIUM] = Measurement(npk_all[SEN0605.ReadingType.POTASSIUM], Unit.MG_PER_KG, now)
         return readings
 
     def needs_watering(self):
@@ -341,9 +354,9 @@ class Patch:
         :return: True if watering is needed; False otherwise
         :rtype: bool
         """
-        needs_watering: bool = self._last_humidity_reading < self.target_humidity
+        needs_watering: bool = self._last_humidity_reading.value < self.target_humidity
         if needs_watering:
-            self._logger.info(f"Watering needed in zone {self.zone.name} - last humidity {self._last_humidity_reading:.2f}% < {self.target_humidity:.2f}%")
+            self._logger.info(f"Watering needed in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.target_humidity:.2f}%")
         return needs_watering
 
     def check_needs_watering(self):
@@ -366,7 +379,7 @@ class Patch:
 
         :return: Whether a drought condition exists (True/False)
         """
-        drought: bool = self._last_humidity_reading < self.min_sensor_humidity
+        drought: bool = self._last_humidity_reading.value < self.min_sensor_humidity
         if drought:
-            self._logger.warning(f"Drought detected in zone {self.zone.name} - last humidity {self._last_humidity_reading:.2f}% < {self.min_sensor_humidity:.2f}%")
+            self._logger.warning(f"Drought detected in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.min_sensor_humidity:.2f}%")
         return drought
