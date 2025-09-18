@@ -1,0 +1,63 @@
+{
+    "RPI": {
+        "date": "Sep 18, 2025",
+        "desc": "Raspberry PI Zero 2W",
+        "name": "RPI",
+        "rpitemp": 56.92,
+        "rpitemp_unit": "\u00b0C",
+        "time": "15:51",
+        "ts": "2025-09-18T15:51:15-05:00",
+        "utc": 1758228675
+    },
+    "Z1": {
+        "date": "Sep 18, 2025",
+        "desc": "Zone 1",
+        "humidity": 46.4,
+        "humidity_unit": "%",
+        "name": "Z1",
+        "ph": 5.0,
+        "ph_unit": "pH",
+        "temperature": 71.6,
+        "temperature_unit": "\u00b0F",
+        "time": "15:51",
+        "total_water": 34.75454545454546,
+        "ts": "2025-09-18T15:51:11-05:00",
+        "utc": 1758228671,
+        "water": 34.75454545454546,
+        "water_unit": "L"
+    },
+    "Z2": {
+        "date": "Sep 18, 2025",
+        "desc": "Zone 2",
+        "humidity": 47.8,
+        "humidity_unit": "%",
+        "name": "Z2",
+        "ph": 5.0,
+        "ph_unit": "pH",
+        "temperature": 71.96,
+        "temperature_unit": "\u00b0F",
+        "time": "15:51",
+        "total_water": 93.14545454545456,
+        "ts": "2025-09-18T15:51:13-05:00",
+        "utc": 1758228673,
+        "water": 93.14545454545456,
+        "water_unit": "L"
+    },
+    "Z3": {
+        "date": "Sep 18, 2025",
+        "desc": "Zone 3",
+        "humidity": 64.6,
+        "humidity_unit": "%",
+        "name": "Z3",
+        "ph": 5.5,
+        "ph_unit": "pH",
+        "temperature": 72.86,
+        "temperature_unit": "\u00b0F",
+        "time": "15:51",
+        "total_water": 67.4060606060606,
+        "ts": "2025-09-18T15:51:14-05:00",
+        "utc": 1758228674,
+        "water": 67.4060606060606,
+        "water_unit": "L"
+    }
+}
