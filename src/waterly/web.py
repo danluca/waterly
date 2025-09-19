@@ -8,8 +8,10 @@ import os
 from datetime import datetime
 from flask import Flask, jsonify, request, render_template, send_from_directory, abort
 from werkzeug.exceptions import HTTPException
+
+from .patch import PATCHES
 from .queues import send_message_to_scheduler
-from .model.measurement import convert_measurement, convert_measurement_unit_type
+from .model.measurement import convert_measurement_unit_type
 from .model.times import valid_timezone, now_local
 from .model.units import UnitType
 from .config import get_project_root, CONFIG, Settings
@@ -106,6 +108,9 @@ def get_latest_sensors():
             v, u = convert_measurement_unit_type(reading, unit, CONFIG[Settings.UNITS])
             result[zone_name][name] = v
             result[zone_name][f"{name}_unit"] = u
+            patch = next((p for p in PATCHES if p.zone.name == zone_name), None)
+            if patch:
+                result[zone_name]["water_state"] = patch.water_state
             if name == "water":
                 result[zone_name]["last_watering"] = datetime.fromtimestamp(tutc/1000, valid_timezone(tz)).strftime("%b %d, %Y")
         # total water consumed per zone
@@ -129,7 +134,7 @@ def get_latest_sensors():
             time = datetime.fromtimestamp(ts/1000.0, valid_timezone(tz))
             c_temp, c_temp_unit = convert_measurement_unit_type(temp, temp_unit, CONFIG[Settings.UNITS])
             c_precip, c_precip_unit = convert_measurement_unit_type(precip, precip_unit, CONFIG[Settings.UNITS])
-            if now < time:
+            if now >= time:
                 if "temp_min" not in weather["prev12"]:
                     weather["prev12"]["temp_min"] = c_temp
                 weather["prev12"]["temp_min"] = min(c_temp, weather["prev12"]["temp_min"])

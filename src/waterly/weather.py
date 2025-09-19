@@ -13,6 +13,7 @@ from typing import Optional
 from .config import DATA_DIR, CONFIG, Settings
 from .model.measurement import convert_measurement
 from .model.times import valid_timezone
+from .model.water_log import WateringAssessment
 from .model.weather_data import WeatherData
 from .model.units import Unit, UnitType
 from .storage import record_weather, get_weather_data
@@ -75,7 +76,7 @@ class WeatherService:
         self._stop.set()
         self._thread.join(timeout=5)
 
-    def should_water_garden(self) -> bool:
+    def should_water_garden(self) -> WateringAssessment:
         """
         Determines whether it is recommended to water the garden based on the current and past weather data
 
@@ -84,15 +85,15 @@ class WeatherService:
          - the past 12 hours have had more than 0.1 inch of rain
          - the next 12-hour rain probability is more than 50% and the amount of rain over 0.1 inch
         Otherwise, it returns true - the garden should be watered.
-        :return: True if it is recommended to water the garden, False otherwise.
-        :rtype: bool
+        :return: True if it is recommended to water the garden, False otherwise; additional information is provided in the reason field.
+        :rtype: WateringAssessment
         """
         now = datetime.now(self._timezone)
         past_12h_data = get_weather_data(now, -12)
         next_12h_data = get_weather_data(now, 12)
         if not next_12h_data:
             self._logger.info("Weather Data assessment: forecast data not available yet - defaulting to enable watering.")
-            return True
+            return WateringAssessment(enabled=True, reason={"next12h": {"warn": "forecast data not available"}}, start_time=now)
         past_12h_rain = 0.0
         past_12h_soil_humidity = 0.0
         next_12h_prob = 0.0
@@ -100,10 +101,10 @@ class WeatherService:
         next_12h_soil_humidity = 0.0
         past_data_points = len(past_12h_data)    # hourly data points
         future_data_points = len(next_12h_data)  # hourly data points, should have a minimum of 6
-        for w in next_12h_data:
+        for w in past_12h_data:
             past_12h_rain += w.precipitation_amount.value
             past_12h_soil_humidity += w.soil_humidity.value
-        for w in past_12h_data:
+        for w in next_12h_data:
             next_12h_prob = max(next_12h_prob, w.precipitation_prob.value)
             next_12h_rain += w.precipitation_amount.value
             next_12h_soil_humidity += w.soil_humidity.value
@@ -115,7 +116,11 @@ class WeatherService:
         self._logger.info(f"Weather Data assessment: Past 12h average soil humidity: {past_12h_soil_humidity*100.0:.2f}%, Future 12h average soil humidity: {next_12h_soil_humidity*100.0:.2f}%")
         rain_12_threshold = convert_measurement(self.RAIN_12H_THRESHOLD_INCHES, Unit.INCHES, precip_unit)
         should_not_water = past_12h_rain > rain_12_threshold or (next_12h_prob > self._precip_prob_threshold and next_12h_rain > rain_12_threshold)
-        return (not should_not_water) or future_data_points < 6
+        rationale = {"past12h": {"rain": past_12h_rain, "rain_threshold": rain_12_threshold, "unit": precip_unit, "data_points": past_data_points,},
+                     "next12h": {"prob": next_12h_prob, "prob_threshold": self._precip_prob_threshold, "rain": next_12h_rain,
+                                 "rain_threshold": rain_12_threshold, "unit": precip_unit, "data_points": future_data_points,}
+                     }
+        return WateringAssessment(enabled=(not should_not_water) or future_data_points < 6, reason=rationale, start_time=now)
 
     def get_last_update(self) -> Optional[datetime]:
         """

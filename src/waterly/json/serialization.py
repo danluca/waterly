@@ -8,7 +8,6 @@ import os
 import threading
 
 from enum import Enum
-from typing import Any
 from datetime import datetime, UTC
 from .times import _json_datetime_encoder, _json_datetime_decoder
 from ..model.trend import *     # needed to have available all model objects in the global scope
@@ -17,6 +16,7 @@ from ..model.units import *     # needed to have available all model objects in 
 from ..model.weather_data import *     # needed to have available all model objects in the global scope
 from ..model.zone import *     # needed to have available all model objects in the global scope
 from ..model.measurement import *
+from ..model.water_log import *     # needed to have available all model objects in the global scope
 
 
 #<editor-fold desc="JSON serialization helpers">

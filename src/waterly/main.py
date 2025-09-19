@@ -12,7 +12,7 @@ import platform
 
 from importlib.metadata import version, PackageNotFoundError
 from .config import ZONES
-from .patch import Patch
+from .patch import PATCHES, initialize_patches
 from .storage import init_db, get_config_from_db, get_zones_from_db
 from .pulses import PulseCounter
 from .scheduler import WateringManager
@@ -59,9 +59,9 @@ def main():
     weather.start()
     pulses.start()
 
-    patches = [Patch(z) for z in ZONES.values() if z.rh_sensor_address]
+    initialize_patches(list(ZONES.values()))
 
-    manager = WateringManager(patches, weather, pulses)
+    manager = WateringManager(PATCHES, weather, pulses)
     manager.start()
 
     logger.info("Starting web server...")

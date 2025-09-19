@@ -9,11 +9,10 @@ import WavesIcon from '@mui/icons-material/Waves';
 
 const fmt = (v) => (typeof v === 'number' ? v.toLocaleString(undefined, {maximumFractionDigits: 2}) : v);
 
-function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValue, secondaryUnit}) {
+function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValue, secondaryUnit, bgColor}) {
     return (
-        <Card variant="outlined" sx={{width: 240, height: 160, display: 'flex', flexDirection: 'column'}}>
-            <CardContent
-                sx={{display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%'}}>
+        <Card variant="outlined" sx={{width: 240, height: 160, display: 'flex', flexDirection: 'column', backgroundColor: bgColor}}>
+            <CardContent sx={{display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%'}}>
                 <div>
                     <Typography variant="overline" color="text.secondary">
                         {subtitle || title}
@@ -22,13 +21,11 @@ function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValu
                         {title}
                     </Typography>
                     <Typography variant="h4" sx={{mt: 1}}>
-                        {fmt(value)} <Typography component="span" variant="h6"
-                                                 color="text.secondary">{unit}</Typography>
+                        {fmt(value)} <Typography component="span" variant="h6" color="text.secondary">{unit}</Typography>
                     </Typography>
                 </div>
                 {secondaryValue !== undefined && (
-                    <Typography variant="body2" color="text.secondary" sx={{mt: 0.75}}>
-                        {secondaryLabel || 'Total'}: <strong>{fmt(secondaryValue)}</strong> {secondaryUnit}
+                    <Typography variant="body2" color="text.secondary" sx={{mt: 0.75}}>{secondaryLabel || 'Total'}: <strong>{fmt(secondaryValue)}</strong> {secondaryUnit}
                     </Typography>
                 )}
             </CardContent>
@@ -45,6 +42,15 @@ export default function App() {
     }, []);
     useEffect(() => {
         fetchManifest().then(setManifest);
+    }, []);
+
+    // Refresh sensors periodically every 17 minutes (1020000 ms)
+    useEffect(() => {
+        const minutes17 = 17 * 60 * 1000;
+        const id = setInterval(() => {
+            fetchSensors().then(setSensorData).catch(() => {});
+        }, minutes17);
+        return () => clearInterval(id);
     }, []);
 
     return (
@@ -122,8 +128,7 @@ export default function App() {
 
                                 return (
                                     <Grid item xs={12} key={zone.name}>
-                                        <Card variant="outlined"
-                                              sx={{p: 2, backgroundColor: zoneBg, borderColor: 'divider'}}>
+                                        <Card variant="outlined" sx={{p: 2, backgroundColor: zoneBg, borderColor: 'divider'}}>
                                             <Typography variant="overline" color="text.secondary">
                                                 {zone.desc || 'Zone'}
                                             </Typography>
@@ -143,13 +148,13 @@ export default function App() {
                                                 ))}
                                                 {hasWater && (
                                                     <Grid item key={`${zone.name}-water`} sx={{height: '100%'}}>
-                                                        <SensorCard
-                                                            subtitle="Water"
+                                                        <SensorCard subtitle="Water"
                                                             value={zone.total_water}
                                                             unit={zone.water_unit}
                                                             secondaryLabel="Last"
                                                             secondaryValue={zone.water}
                                                             secondaryUnit={`${zone.water_unit}${zone.last_watering != null ? ` @ ${zone.last_watering}` : ''}`}
+                                                            bgColor={zone.water_state ? '#cae7fc' : undefined}
                                                         />
                                                     </Grid>
                                                 )}
@@ -161,8 +166,7 @@ export default function App() {
                             {/* Weather "zone" after RPI */}
                             {weather && (
                                 <Grid item xs={12} key="weather-zone">
-                                    <Card variant="outlined"
-                                          sx={{p: 2, backgroundColor: '#E3F2FD', borderColor: 'divider'}}>
+                                    <Card variant="outlined" sx={{p: 2, backgroundColor: '#E3F2FD', borderColor: 'divider'}}>
                                         <Typography variant="overline" color="text.secondary">
                                             Forecast
                                         </Typography>
@@ -186,8 +190,7 @@ export default function App() {
                                         })()}
                                         <Grid container spacing={2} alignItems="stretch" sx={{mt: 0.5}}>
                                             <Grid item sx={{height: '100%'}}>
-                                                <SensorCard
-                                                    subtitle="Previous 12h"
+                                                <SensorCard subtitle="Previous 12h"
                                                     value={`${fmt(weather.prev12?.temp_min)} - ${fmt(weather.prev12?.temp_max)}`}
                                                     unit={weather.prev12?.temp_unit}
                                                     secondaryLabel="Rain"
@@ -196,8 +199,7 @@ export default function App() {
                                                 />
                                             </Grid>
                                             <Grid item sx={{height: '100%'}}>
-                                                <SensorCard
-                                                    subtitle="Next 12h"
+                                                <SensorCard subtitle="Next 12h"
                                                     value={`${fmt(weather.next12?.temp_min)} - ${fmt(weather.next12?.temp_max)}`}
                                                     unit={weather.next12?.temp_unit}
                                                     secondaryLabel="Rain"
@@ -230,7 +232,7 @@ export default function App() {
                                style={{marginLeft: '0.2rem'}}>
                     {`${manifest?.name} v${manifest?.version}`}
                 </a> - {manifest?.description}
-                    {' • '} <a href={`${manifest?.git_url}/commit/${manifest?.git_sha}`} target="_blank"
+                    {' • '} <a href={`${manifest?.git_url}/tree/${manifest?.git_sha}`} target="_blank"
                                rel="noopener noreferrer" style={{marginLeft: '0.2rem'}}>
                     {`${manifest?.git_branch} @ ${manifest?.git_sha ? manifest.git_sha.slice(0, 8) : ''}`}
                 </a>

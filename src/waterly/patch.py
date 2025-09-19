@@ -356,7 +356,7 @@ class Patch:
         """
         needs_watering: bool = self._last_humidity_reading.value < self.target_humidity
         if needs_watering:
-            self._logger.info(f"Watering needed in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.target_humidity:.2f}%")
+            self._logger.debug(f"Watering needed in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.target_humidity:.2f}%")
         return needs_watering
 
     def check_needs_watering(self):
@@ -383,3 +383,20 @@ class Patch:
         if drought:
             self._logger.warning(f"Drought detected in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.min_sensor_humidity:.2f}%")
         return drought
+
+
+PATCHES: list[Patch] = []
+
+def initialize_patches(zones: list[Zone]) -> int:
+    """
+    Initializes the global PATCHES collection once from zones that have an RH sensor.
+    Returns the total number of initialized patches.
+    """
+    global PATCHES  # type: list[Patch]
+    if PATCHES:  # already initialized
+        return len(PATCHES)
+
+    new_patches = [Patch(z) for z in zones if getattr(z, "rh_sensor_address", None)]
+    PATCHES.extend(new_patches)
+    size = len(PATCHES)
+    return size

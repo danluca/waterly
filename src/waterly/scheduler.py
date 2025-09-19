@@ -9,13 +9,16 @@ import logging
 from datetime import datetime, time as dtime
 from typing import Optional
 from gpiozero import CPUTemperature
-from waterly.model.units import Unit
+from waterly.model.measurement import convert_measurement
 
 from .config import CONFIG, Settings, UnitType
 from .model.measurement import WateringMeasurement, Measurement
+from .model.water_log import WateringRecord, WateringAssessment
+from .model.units import Unit
 from .patch import Patch
 from .pulses import PulseCounter
-from .storage import record_npk, record_rh, record_watering, record_rpi_temperature, TrendName
+from .storage import record_npk, record_rh, record_watering, record_rpi_temperature, TrendName, \
+    record_watering_assessment, record_waterlog
 from .weather import WeatherService
 
 
@@ -135,17 +138,23 @@ class WateringManager:
             if self._last_watering_date != today_key:
                 if now.time() >= self._start_time:
                     if not self._is_in_gardening_season(now):
-                        self._logger.warning(f"Skipping watering - current time {now.isoformat()} is "
-                            f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON].get('start')} to {CONFIG[Settings.GARDENING_SEASON].get('end')}")
+                        msg = f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON].get('start')} to {CONFIG[Settings.GARDENING_SEASON].get('end')}"
+                        self._logger.warning(f"Skipping watering - current time {now.isoformat()} is {msg}")
                         self._last_watering_date = today_key
                         CONFIG[Settings.LAST_WATERING_DATE] = today_key
+                        record_watering_assessment(WateringAssessment(enabled=False, reason={"warn": msg}, start_time=now))
                         continue
-                    # Decide if we cancel due to weather or already on target humidity
+                    # weather assessment
                     has_drought = any(patch.has_drought() for patch in self.patches)
-                    should_water = self.weather.should_water_garden() or has_drought
-                    if should_water:
+                    weather_assessment = self.weather.should_water_garden()
+                    weather_assessment.reason["drought"] = has_drought
+                    weather_assessment.enabled = weather_assessment.enabled or has_drought
+                    # persist current assessment
+                    record_watering_assessment(weather_assessment)
+                    # Decide if we cancel due to weather
+                    if weather_assessment.enabled:
                         self._logger.info("Weather data enables watering")
-                        self._perform_watering(self._max_minutes)
+                        self._perform_watering(weather_assessment)
                         CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         self._last_watering_date = today_key
                     else:
@@ -198,19 +207,17 @@ class WateringManager:
         record_rpi_temperature(rpi_temp if metric else rpi_temp.convert(Unit.FAHRENHEIT))
         self._logger.info("Storage of sensor readings finished")
 
-    def _perform_watering(self, max_minutes_per_zone: int):
+    def _perform_watering(self, weather_assessment: WateringAssessment):
         """
         Executes a watering cycle for each patch in the respective zones based on target
         humidity and the maximum allowed time per zone. The process involves sequentially
         watering the patches, monitoring the humidity, and calculating the water usage for
         each zone. Once the watering process is complete, all patches are turned off.
 
-        :param max_minutes_per_zone: Maximum duration in minutes to water each zone, after
-            which the watering process for that zone stops regardless of the humidity level
-        :type max_minutes_per_zone: int
+        :param weather_assessment: watering assessment object of the weather forecast - used for record keeping, does not affect watering
+        :type weather_assessment: WateringAssessment
         :return: None
         """
-
         self._logger.info("Starting watering cycle")
         metric: bool = CONFIG[Settings.UNITS] == UnitType.METRIC
         water_unit = Unit.LITERS if metric else Unit.GALLONS
@@ -223,6 +230,9 @@ class WateringManager:
                 if not patch.needs_watering():
                     self._logger.info(f"Watering canceled for zone {patch.zone.name} due to target humidity reached: "
                                       f"{patch.current_humidity:.2f}% >= {patch.target_humidity:.2f}%")
+                    msmt = WateringMeasurement(patch.current_humidity.timestamp, 0, water_unit, patch.target_humidity,
+                                               patch.current_humidity.value, 0)
+                    record_waterlog(WateringRecord(patch.zone, False, msmt), weather_assessment)
                     continue
 
                 patch.open_sensor_bus()
@@ -233,7 +243,7 @@ class WateringManager:
                 zone_done = False
                 humid_start = patch.humidity()
                 self._logger.info(f"Watering zone {patch.zone.name} started at humidity level {humid_start.value:.2f}%")
-                while not zone_done and (int(time.time()) - start_ts) < (max_minutes_per_zone * 60):
+                while not zone_done and (int(time.time()) - start_ts) < (self._max_minutes * 60):
                     # Wait a bit and measure water
                     time.sleep(10)
                     # Check humidity threshold
@@ -250,12 +260,13 @@ class WateringManager:
                 cur_local_time = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
 
                 # Compute water used during this watering cycle
-                water_amount = self.pulses.read_and_reset()
-                msmt = WateringMeasurement(cur_local_time, water_amount, Unit.LITERS, humid_start.value, humid_stop.value, stop_ts-start_ts)
-                record_watering(patch.zone.name, msmt if metric else msmt.convert(Unit.GALLONS))
+                water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit)
+                msmt = WateringMeasurement(cur_local_time, water_amount, water_unit, humid_start.value, humid_stop.value, stop_ts-start_ts)
+                record_watering(patch.zone.name, msmt)
                 m,s = divmod((stop_ts-start_ts), 60)
-                self._logger.info(f"Zone {patch.zone.name} watered for {m:02d}:{s:02d} min. Used ~{msmt.convert(water_unit).value:.2f} "
-                                  f"{water_unit} of water and ended at humidity level {humid_stop.value:.2f}%")
+                self._logger.info(f"Zone {patch.zone.name} watered for {m:02d}:{s:02d} min. Used ~{msmt.value:.2f} "
+                                  f"{msmt.unit} of water and ended at humidity level {humid_stop.value:.2f}%")
+                record_waterlog(WateringRecord(patch.zone, True, msmt), weather_assessment)
                 # Wait a bit before starting the next zone; allows the water valves to close properly before starting the next one
                 time.sleep(10)
         finally:

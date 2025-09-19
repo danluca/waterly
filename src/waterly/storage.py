@@ -20,6 +20,7 @@ from .model.trend import TrendName
 from .model.units import Unit, UnitType
 from .model.weather_data import WeatherData
 from .model.zone import Zone
+from .model.water_log import WateringRecord, WateringAssessment
 
 __db_file_name = f"{get_project_root()}/data/waterly-{datetime.now().year}.sqlite"
 
@@ -295,6 +296,41 @@ def record_watering(zone: str, measurement: WateringMeasurement):
     and duration are currently not persisted in this simplified schema.
     """
     record_measurement(TrendName.WATER, zone, measurement)
+
+def record_watering_assessment(wass: WateringAssessment):
+    """
+    Stores the watering assessment in watering_assessment table
+    """
+    with db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT OR REPLACE INTO watering_assessment(start_ts_utc, tz, enabled, reason_json) VALUES (?,?,?,?)",
+            (int(wass.start_time.timestamp() * 1000), str(wass.start_time.tzinfo), wass.enabled,
+                json.dumps(wass.reason) if wass.reason is not None else "{}"))
+        conn.commit()
+
+def record_waterlog(waterlog: WateringRecord, wass: WateringAssessment):
+    """
+    Persist a WateringLogEntry by splitting it into a watering_assessment (zone-agnostic)
+    and a watering_record (per-zone).
+    """
+    with db() as conn:
+        # Resolve zone id
+        zone_id_row = conn.execute("SELECT id FROM zone WHERE name=?", (waterlog.zone.name,)).fetchone()
+        zone_id = zone_id_row[0] if zone_id_row else None
+        # Resolve assessment id
+        assessment_id_row = conn.execute("SELECT id FROM watering_assessment WHERE start_ts_utc=? AND enabled=?",
+            (int(wass.start_time.timestamp() * 1000), wass.enabled),).fetchone()
+        assessment_id = assessment_id_row[0] if assessment_id_row else None
+
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO watering_record(assessment_id, zone_id, start_ts_utc, start_ts_tz, executed, "
+                    "duration_sec, humidity_start, humidity_end, water_amount, water_unit) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (assessment_id, zone_id, int(waterlog.measurement.timestamp.timestamp() * 1000), str(waterlog.measurement.timestamp.tzinfo),
+             waterlog.executed, waterlog.measurement.duration_sec, waterlog.measurement.humidity_start, waterlog.measurement.humidity_end,
+             waterlog.measurement.value, waterlog.measurement.unit))
+
+        conn.commit()
 
 def record_weather(weather_data: list[WeatherData]):
     """
