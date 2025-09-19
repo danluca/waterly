@@ -16,6 +16,7 @@ class UnitType(StrEnum):
     """
     METRIC = "metric"
     IMPERIAL = "imperial"
+    CANONICAL = METRIC
 
 class Unit(StrEnum):
     """

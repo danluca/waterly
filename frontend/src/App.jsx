@@ -166,9 +166,24 @@ export default function App() {
                                         <Typography variant="overline" color="text.secondary">
                                             Forecast
                                         </Typography>
-                                        <Typography variant="h6" sx={{mt: 0.5}}>
-                                            • {weather.timestamp?.date} {weather.timestamp?.time ? `@ ${weather.timestamp.time}` : ''}
-                                        </Typography>
+                                        {(() => {
+                                            const nowUtc = weather.timestamp?.utc;
+                                            const fcUtc = weather.forecast_time?.utc;
+                                            let ageStr = null;
+                                            if (nowUtc && fcUtc) {
+                                                const diffSec = Math.max(0, nowUtc - fcUtc);
+                                                const h = Math.floor(diffSec / 3600);
+                                                const m = Math.floor((diffSec % 3600) / 60);
+                                                const hh = String(h).padStart(2, '0');
+                                                const mm = String(m).padStart(2, '0');
+                                                ageStr = `${hh}:${mm} hrs`;
+                                            }
+                                            return (
+                                                <Typography variant="h6" sx={{mt: 0.5}}>
+                                                    • {weather.timestamp?.date} {weather.timestamp?.time ? `@ ${weather.timestamp.time}` : ''}{ageStr ? ` (age ${ageStr})` : ''}
+                                                </Typography>
+                                            );
+                                        })()}
                                         <Grid container spacing={2} alignItems="stretch" sx={{mt: 0.5}}>
                                             <Grid item sx={{height: '100%'}}>
                                                 <SensorCard

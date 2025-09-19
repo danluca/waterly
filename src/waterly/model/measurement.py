@@ -6,7 +6,39 @@
 from datetime import datetime
 from typing import Optional
 
-from .units import Unit
+from .units import Unit, UnitType
+
+def __get_unit_for_type(cur_unit: Unit, unit_type: UnitType) -> Unit:
+    """
+    Determines the most suitable unit for a specified unit type based on the current
+    unit. This function maps between METRIC and IMPERIAL unit types for specific
+    unit categories. If the current unit does not match a predefined conversion
+    scenario, it is returned as-is.
+
+    :param cur_unit: The current unit that needs to be converted.
+    :type cur_unit: Unit
+    :param unit_type: The target unit type for conversion (either METRIC or IMPERIAL).
+    :type unit_type: UnitType
+    :return: The unit most appropriate for the specified unit type,
+        based on the current unit.
+    :rtype: Unit
+    """
+    match cur_unit:
+        case Unit.CELSIUS:
+            return cur_unit if unit_type == UnitType.METRIC else Unit.FAHRENHEIT
+        case Unit.FAHRENHEIT:
+            return cur_unit if unit_type == UnitType.IMPERIAL else Unit.CELSIUS
+        case Unit.LITERS:
+            return cur_unit if unit_type == UnitType.METRIC else Unit.GALLONS
+        case Unit.GALLONS:
+            return cur_unit if unit_type == UnitType.IMPERIAL else Unit.LITERS
+        case Unit.INCHES:
+            return cur_unit if unit_type == UnitType.METRIC else Unit.MM
+        case Unit.MM:
+            return cur_unit if unit_type == UnitType.IMPERIAL else Unit.INCHES
+        case _:
+            return cur_unit
+
 
 def convert_measurement(value: float|int|None, current_unit: Unit, new_unit: Unit) -> float|int|None:
     """
@@ -44,6 +76,10 @@ def convert_measurement(value: float|int|None, current_unit: Unit, new_unit: Uni
         case Unit.MM, Unit.INCHES:
             return value / 25.4
     return value
+
+def convert_measurement_unit_type(value: float|int|None, current_unit: Unit, new_unit_type: UnitType) -> tuple[float|int|None, Unit]:
+    new_unit = __get_unit_for_type(current_unit, new_unit_type)
+    return (value, current_unit) if new_unit == current_unit else (convert_measurement(value, current_unit, new_unit), new_unit)
 
 class Measurement:
     """
@@ -116,6 +152,23 @@ class Measurement:
         :rtype: Measurement
         """
         return Measurement(convert_measurement(self._data, self._unit, new_unit), new_unit, self._time)
+
+    def convert_unit_type(self, unit_type: UnitType) -> "Measurement":
+        """
+        Convert the current measurement to a specified unit type (metric, imperial, etc.).
+
+        This method converts the internal data of the current measurement object
+        from its current unit type to a new specified unit type. The conversion
+        is achieved by utilizing the `convert_measurement_unit_type` function while
+        preserving the original time of the measurement.
+
+        :param unit_type: The unit type to which the measurement will be converted.
+        :type unit_type: UnitType
+        :return: A new Measurement object with the converted data and specified unit type.
+        :rtype: Measurement
+        """
+        v, u = convert_measurement_unit_type(self._data, self._unit, unit_type)
+        return Measurement(v, u, self._time)
 
     def json_encode(self):
         return {
@@ -218,6 +271,23 @@ class WateringMeasurement(Measurement):
         :rtype: WateringMeasurement
         """
         return WateringMeasurement(self._time, convert_measurement(self._data, self._unit, new_unit), new_unit, self._humidity_start, self._humidity_end, self._duration_sec)
+
+    def convert_unit_type(self, unit_type: UnitType) -> "Measurement":
+        """
+        Convert the current measurement to a specified unit type (metric, imperial, etc.).
+
+        This method converts the internal data of the current measurement object
+        from its current unit type to a new specified unit type. The conversion
+        is achieved by utilizing the `convert_measurement_unit_type` function while
+        preserving the original time of the measurement.
+
+        :param unit_type: The unit type to which the measurement will be converted.
+        :type unit_type: UnitType
+        :return: A new WateringMeasurement object with the converted data and specified unit.
+        :rtype: WateringMeasurement
+        """
+        v, u = convert_measurement_unit_type(self._data, self._unit, unit_type)
+        return WateringMeasurement(self._time, v, u, self._humidity_start, self._humidity_end, self._duration_sec)
 
     def json_encode(self):
         return {

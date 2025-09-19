@@ -1,12 +1,12 @@
 {
   "author": "Dan Luca",
-  "git_repo": "git@github.com:danluca/waterly.git",
-  "version": "1.0.0",
-  "name": "Waterly",
-  "git_branch": "main",
-  "description": "Smart garden watering management system",
+  "git_sha": "4946935617d437074345755eceec4113a03cddd9",
   "license": "MIT",
   "git_url": "https://github.com/danluca/waterly",
-  "git_sha": "aac29fce19a9f4e357fe77a0f2f0b19af8fa64b9",
-  "build_date": "2025-09-18"
+  "description": "Smart garden watering management system",
+  "git_branch": "main",
+  "name": "Waterly",
+  "version": "1.0.0",
+  "git_repo": "git@github.com:danluca/waterly.git",
+  "build_date": "2025-09-19"
 }

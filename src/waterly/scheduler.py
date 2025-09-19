@@ -252,7 +252,7 @@ class WateringManager:
                 # Compute water used during this watering cycle
                 water_amount = self.pulses.read_and_reset()
                 msmt = WateringMeasurement(cur_local_time, water_amount, Unit.LITERS, humid_start.value, humid_stop.value, stop_ts-start_ts)
-                record_watering(patch.zone.name, msmt)
+                record_watering(patch.zone.name, msmt if metric else msmt.convert(Unit.GALLONS))
                 m,s = divmod((stop_ts-start_ts), 60)
                 self._logger.info(f"Zone {patch.zone.name} watered for {m:02d}:{s:02d} min. Used ~{msmt.convert(water_unit).value:.2f} "
                                   f"{water_unit} of water and ended at humidity level {humid_stop.value:.2f}%")

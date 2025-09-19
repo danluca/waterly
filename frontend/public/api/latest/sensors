@@ -1,90 +1,98 @@
 {
     "RPI": {
-        "date": "Sep 18, 2025",
+        "date": "Sep 19, 2025",
         "desc": "Raspberry PI Zero 2W",
         "name": "RPI",
-        "rpitemp": 42.932,
-        "rpitemp_unit": "\u00b0C",
-        "time": "21:25",
-        "ts": "2025-09-18T21:25:53-05:00",
-        "utc": 1758248753
+        "rpitemp": 115.088,
+        "rpitemp_unit": "\u00b0F",
+        "time": "15:00",
+        "ts": "2025-09-19T15:00:43-05:00",
+        "utc": 1758312043
     },
     "Z1": {
-        "date": "Sep 18, 2025",
+        "date": "Sep 19, 2025",
         "desc": "Zone 1",
-        "humidity": 53.0,
+        "humidity": 52.5,
         "humidity_unit": "%",
+        "last_watering": "Sep 17, 2025",
         "name": "Z1",
-        "ph": 4.5,
+        "ph": 4.9,
         "ph_unit": "pH",
-        "temperature": 69.62,
+        "temperature": 69.08,
         "temperature_unit": "\u00b0F",
-        "time": "21:25",
-        "total_water": 34.75454545454546,
-        "ts": "2025-09-18T21:25:48-05:00",
-        "utc": 1758248748,
-        "water": 34.75454545454546,
-        "water_unit": "L"
+        "time": "15:00",
+        "total_water": 9.181179601501832,
+        "ts": "2025-09-19T15:00:38-05:00",
+        "utc": 1758312038,
+        "water": 9.181179601501832,
+        "water_unit": "gal"
     },
     "Z2": {
-        "date": "Sep 18, 2025",
+        "date": "Sep 19, 2025",
         "desc": "Zone 2",
-        "humidity": 58.7,
+        "humidity": 60.7,
         "humidity_unit": "%",
+        "last_watering": "Sep 17, 2025",
         "name": "Z2",
-        "ph": 4.8,
+        "ph": 4.6,
         "ph_unit": "pH",
-        "temperature": 69.25999999999999,
+        "temperature": 69.08,
         "temperature_unit": "\u00b0F",
-        "time": "21:25",
-        "total_water": 93.14545454545456,
-        "ts": "2025-09-18T21:25:50-05:00",
-        "utc": 1758248750,
-        "water": 93.14545454545456,
-        "water_unit": "L"
+        "time": "15:00",
+        "total_water": 24.606425895105353,
+        "ts": "2025-09-19T15:00:41-05:00",
+        "utc": 1758312041,
+        "water": 24.606425895105353,
+        "water_unit": "gal"
     },
     "Z3": {
-        "date": "Sep 18, 2025",
+        "date": "Sep 19, 2025",
         "desc": "Zone 3",
-        "humidity": 74.4,
+        "humidity": 71.2,
         "humidity_unit": "%",
+        "last_watering": "Sep 17, 2025",
         "name": "Z3",
-        "ph": 5.6,
+        "ph": 5.4,
         "ph_unit": "pH",
-        "temperature": 70.34,
+        "temperature": 69.98,
         "temperature_unit": "\u00b0F",
-        "time": "21:25",
-        "total_water": 67.4060606060606,
-        "ts": "2025-09-18T21:25:51-05:00",
-        "utc": 1758248751,
-        "water": 67.4060606060606,
-        "water_unit": "L"
+        "time": "15:00",
+        "total_water": 17.80679737168077,
+        "ts": "2025-09-19T15:00:42-05:00",
+        "utc": 1758312042,
+        "water": 17.80679737168077,
+        "water_unit": "gal"
     },
     "weather": {
+        "forecast_time": {
+            "date": "Sep 19, 2025",
+            "time": "10:39",
+            "utc": 1758296364.687822
+        },
         "location": {
             "latitude": 45.031667,
             "longitude": -93.45025
         },
         "next12": {
-            "precip": 0.008,
-            "precip_prob": 43.0,
+            "precip": 0.083,
+            "precip_prob": 49.0,
             "precip_unit": "inch",
-            "temp_max": 83.5,
-            "temp_min": 68.0,
+            "temp_max": 73.0,
+            "temp_min": 65.2,
             "temp_unit": "\u00b0F"
         },
         "prev12": {
-            "precip": 0.08299999999999999,
+            "precip": 0.016,
             "precip_prob": 44.0,
             "precip_unit": "inch",
-            "temp_max": 67.4,
-            "temp_min": 65.4,
+            "temp_max": 71.3,
+            "temp_min": 60.0,
             "temp_unit": "\u00b0F"
         },
         "timestamp": {
-            "date": "Sep 18, 2025",
-            "time": "21:39",
-            "utc": 1758249555.886787
+            "date": "Sep 19, 2025",
+            "time": "15:07",
+            "utc": 1758312448.363837
         }
     }
 }

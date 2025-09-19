@@ -9,8 +9,9 @@ from datetime import datetime
 from flask import Flask, jsonify, request, render_template, send_from_directory, abort
 from werkzeug.exceptions import HTTPException
 from .queues import send_message_to_scheduler
-from .model.measurement import convert_measurement
+from .model.measurement import convert_measurement, convert_measurement_unit_type
 from .model.times import valid_timezone, now_local
+from .model.units import UnitType
 from .config import get_project_root, CONFIG, Settings
 from .storage import db
 
@@ -102,8 +103,9 @@ def get_latest_sensors():
             result[zone_name]["ts"] = time.isoformat()
             result[zone_name]["date"] = time.strftime("%b %d, %Y")
             result[zone_name]["time"] = time.strftime("%H:%M")
-            result[zone_name][name] = reading
-            result[zone_name][f"{name}_unit"] = unit
+            v, u = convert_measurement_unit_type(reading, unit, CONFIG[Settings.UNITS])
+            result[zone_name][name] = v
+            result[zone_name][f"{name}_unit"] = u
             if name == "water":
                 result[zone_name]["last_watering"] = datetime.fromtimestamp(tutc/1000, valid_timezone(tz)).strftime("%b %d, %Y")
         # total water consumed per zone
@@ -112,7 +114,8 @@ def get_latest_sensors():
         for w, z, u in waters:
             if "total_water" not in result[z]:
                 result[z]["total_water"] = 0
-            result[z]["total_water"] += convert_measurement(w, u, result[z]["water_unit"])
+            v, u = convert_measurement_unit_type(w, u, CONFIG[Settings.UNITS])
+            result[z]["total_water"] += v   # the units are the same as the water reading above
             if "last_watering" not in result[z]:
                 result[z]["last_watering"] = "n/a"
         # weather info - exclude items without precipitation probability (current conditions)
@@ -124,38 +127,42 @@ def get_latest_sensors():
         for ts, tz, temp, temp_unit, precip, precip_unit, precip_prob in wrows:
             # find temp min and max for previous 12h and next 12h
             time = datetime.fromtimestamp(ts/1000.0, valid_timezone(tz))
+            c_temp, c_temp_unit = convert_measurement_unit_type(temp, temp_unit, CONFIG[Settings.UNITS])
+            c_precip, c_precip_unit = convert_measurement_unit_type(precip, precip_unit, CONFIG[Settings.UNITS])
             if now < time:
                 if "temp_min" not in weather["prev12"]:
-                    weather["prev12"]["temp_min"] = temp
-                weather["prev12"]["temp_min"] = min(temp, weather["prev12"]["temp_min"])
+                    weather["prev12"]["temp_min"] = c_temp
+                weather["prev12"]["temp_min"] = min(c_temp, weather["prev12"]["temp_min"])
                 if "temp_max" not in weather["prev12"]:
-                    weather["prev12"]["temp_max"] = temp
-                weather["prev12"]["temp_max"] = max(temp, weather["prev12"]["temp_max"])
-                weather["prev12"]["temp_unit"] = temp_unit
+                    weather["prev12"]["temp_max"] = c_temp
+                weather["prev12"]["temp_max"] = max(c_temp, weather["prev12"]["temp_max"])
+                weather["prev12"]["temp_unit"] = c_temp_unit
                 if "precip" not in weather["prev12"]:
                     weather["prev12"]["precip"] = 0
-                weather["prev12"]["precip"] += precip
-                weather["prev12"]["precip_unit"] = precip_unit
+                weather["prev12"]["precip"] += c_precip
+                weather["prev12"]["precip_unit"] = c_precip_unit
                 if "precip_prob" not in weather["prev12"]:
                     weather["prev12"]["precip_prob"] = precip_prob
                 weather["prev12"]["precip_prob"] = max(precip_prob, weather["prev12"]["precip_prob"])
             else:
                 if "temp_min" not in weather["next12"]:
-                    weather["next12"]["temp_min"] = temp
-                weather["next12"]["temp_min"] = min(temp, weather["next12"]["temp_min"])
+                    weather["next12"]["temp_min"] = c_temp
+                weather["next12"]["temp_min"] = min(c_temp, weather["next12"]["temp_min"])
                 if "temp_max" not in weather["next12"]:
-                    weather["next12"]["temp_max"] = temp
-                weather["next12"]["temp_max"] = max(temp, weather["next12"]["temp_max"])
-                weather["next12"]["temp_unit"] = temp_unit
+                    weather["next12"]["temp_max"] = c_temp
+                weather["next12"]["temp_max"] = max(c_temp, weather["next12"]["temp_max"])
+                weather["next12"]["temp_unit"] = c_temp_unit
                 if "precip" not in weather["next12"]:
                     weather["next12"]["precip"] = 0
-                weather["next12"]["precip"] += precip
-                weather["next12"]["precip_unit"] = precip_unit
+                weather["next12"]["precip"] += c_precip
+                weather["next12"]["precip_unit"] = c_precip_unit
                 if "precip_prob" not in weather["next12"]:
                     weather["next12"]["precip_prob"] = precip_prob
                 weather["next12"]["precip_prob"] = max(precip_prob, weather["next12"]["precip_prob"])
         weather["timestamp"] = {"date": now.strftime("%b %d, %Y"), "time": now.strftime("%H:%M"), "utc": now.timestamp()}
         weather["location"] = CONFIG[Settings.LOCATION]
+        forecast_time = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
+        weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
         result["weather"] = weather
         return jsonify(result)
 
