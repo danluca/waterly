@@ -7,6 +7,6 @@
   "description": "Smart garden watering management system",
   "license": "MIT",
   "git_url": "https://github.com/danluca/waterly",
-  "git_sha": "58e37e35e51b647586273e7689810a40776c2ada",
+  "git_sha": "aac29fce19a9f4e357fe77a0f2f0b19af8fa64b9",
   "build_date": "2025-09-18"
 }

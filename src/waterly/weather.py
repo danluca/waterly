@@ -300,9 +300,9 @@ class WeatherService:
             horizon_from = now - timedelta(hours=12)
             horizon_to = now + timedelta(hours=12)
             for w in wdata:
-                if now > w.timestamp >= horizon_from:
+                if now >= w.timestamp >= horizon_from:
                     past_12h_rain += w.precipitation_amount.value
-                if horizon_to <= w.timestamp < now:
+                if horizon_to >= w.timestamp > now:
                     next_12h_prob = max(next_12h_prob, w.precipitation_prob.value)
                     next_12h_rain += w.precipitation_amount.value
             with self._lock:
@@ -312,8 +312,8 @@ class WeatherService:
             self._logger.info(f"Current weather conditions @ {current.get('time')} :: Temperature: {current.get('temperature_2m', 0)}"
                 f"{current_units.get('temperature_2m')}, Humidity: {current.get('relative_humidity_2m', 0)}%, Precipitation: {current.get('precipitation', 0)}"
                 f"{current_units.get('precipitation')}, Pressure: {current.get('surface_pressure', 0)}{current_units.get('surface_pressure')}")
-            self._logger.info(f"Weather updated successfully. Previous 12h rain amount: {past_12h_rain:.2f}{hourly_units.get('precipitation')}."
-                f"Next 12h rain: {next_12h_rain:.2f}{hourly_units.get('precipitation')} with {next_12h_prob*100:.2f}% chance")
+            self._logger.info(f"Weather updated successfully. Previous 12h rain amount: {past_12h_rain:.2f}{hourly_units.get('precipitation')}. "
+                f"Next 12h rain: {next_12h_rain:.2f}{hourly_units.get('precipitation')} with {next_12h_prob:.2f}% chance")
         except Exception as e:
             self._logger.error(f"Failed to update weather data, will retry: {e}", exc_info=True)
             result = False

@@ -195,7 +195,7 @@ class WateringManager:
             except Exception as e:
                 self._logger.error(f"Sensors readings storage failed for zone {zone}: {e}", exc_info=True)
         rpi_temp = Measurement(CPUTemperature().temperature, Unit.CELSIUS, datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]))
-        record_rpi_temperature(rpi_temp)
+        record_rpi_temperature(rpi_temp if metric else rpi_temp.convert(Unit.FAHRENHEIT))
         self._logger.info("Storage of sensor readings finished")
 
     def _perform_watering(self, max_minutes_per_zone: int):
