@@ -229,7 +229,7 @@ class WateringManager:
                 # check whether humidity is already above target for this zone
                 if not patch.needs_watering():
                     self._logger.info(f"Watering canceled for zone {patch.zone.name} due to target humidity reached: "
-                                      f"{patch.current_humidity:.2f}% >= {patch.target_humidity:.2f}%")
+                                      f"{patch.current_humidity.value:.2f}% >= {patch.target_humidity:.2f}%")
                     msmt = WateringMeasurement(patch.current_humidity.timestamp, 0, water_unit, patch.target_humidity,
                                                patch.current_humidity.value, 0)
                     record_waterlog(WateringRecord(patch.zone, False, msmt), weather_assessment)

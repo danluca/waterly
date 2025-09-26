@@ -12,8 +12,8 @@ from .model.measurement import Measurement
 from .model.zone import Zone
 from .model.times import now_local
 from .model.units import Unit
+from .model.trend import TrendName
 from .dfrobot import SEN0604, SEN0605
-from .storage import TrendName
 from .config import CONFIG, Settings
 
 def convert_celsius_fahrenheit(celsius: float) -> float:

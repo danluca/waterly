@@ -4,3 +4,5 @@ node_modules/
 build/
 data/
 logs/
+src/web/static/manifest.json
+frontend/public/api/manifest
