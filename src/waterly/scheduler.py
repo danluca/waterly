@@ -9,14 +9,14 @@ import logging
 from datetime import datetime, time as dtime
 from typing import Optional
 from gpiozero import CPUTemperature
-from waterly.model.measurement import convert_measurement
 
 from .config import CONFIG, Settings, UnitType
-from .model.measurement import WateringMeasurement, Measurement
+from .model.measurement import WateringMeasurement, Measurement, convert_measurement
 from .model.water_log import WateringRecord, WateringAssessment
 from .model.units import Unit
 from .patch import Patch
 from .pulses import PulseCounter
+from .queues import receive_scheduler_message, QueueMessage, Action
 from .storage import record_npk, record_rh, record_watering, record_rpi_temperature, TrendName, \
     record_watering_assessment, record_waterlog
 from .weather import WeatherService
@@ -56,7 +56,6 @@ class WateringManager:
         self._start_time: dtime = dtime(hh, mm)
         self._max_minutes: int = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
         self._logger = logging.getLogger(__name__)
-        self._last_humidity_reading: dict[str, float] = {}
 
     def start(self):
         """
@@ -113,6 +112,23 @@ class WateringManager:
             # Wrapping season (e.g., 11-01 .. 03-31)
             return t >= start_md or t <= end_md
 
+    def _handle_thread_messages(self):
+        # noinspection PyBroadException
+        try:
+            msg: QueueMessage|None = receive_scheduler_message()
+            if msg is None:
+                return
+            if msg.action == Action.UPDATE_CONFIG:
+                self._logger.info(f"Updating instance parameters from config")
+
+                hh, mm = [int(x) for x in CONFIG[Settings.WATERING_START_TIME].split(":")]
+                self._start_time = dtime(hh, mm)
+                self._max_minutes = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
+                self._last_watering_date = CONFIG[Settings.LAST_WATERING_DATE]
+        except Exception as e:
+            self._logger.error(f"Failed to handle scheduler message: {e}", exc_info=True)
+            pass
+
     def _run(self):
         """
         Monitors and manages periodic sensor polling, orchestrates the daily watering
@@ -125,9 +141,10 @@ class WateringManager:
         self._logger.info("Starting WateringManager")
         # Sensors polling loop and daily schedule orchestration
         last_poll:int = 0
-        poll_interval:int = CONFIG[Settings.SENSOR_READ_INTERVAL_SECONDS]
         while not self._stop.is_set():
+            self._handle_thread_messages()
             epoch = int(time.time())
+            poll_interval:int = int(CONFIG[Settings.SENSOR_READ_INTERVAL_SECONDS])
             # Poll sensors periodically
             if epoch - last_poll >= poll_interval:
                 self._poll_sensors()
@@ -161,7 +178,7 @@ class WateringManager:
                         self._logger.info("Watering canceled due to weather current conditions and forecast")
                         CONFIG[Settings.LAST_WATERING_DATE] = today_key
                         self._last_watering_date = today_key
-            self._stop.wait(5.0)
+            self._stop.wait(30.0)
 
     def _poll_sensors(self):
         """
@@ -191,7 +208,6 @@ class WateringManager:
             zone = patch.zone.name
             try:
                 if readings.get(TrendName.TEMPERATURE) is not None:
-                    self._last_humidity_reading[zone] = readings[TrendName.HUMIDITY].value
                     record_rh(zone, readings[TrendName.HUMIDITY], readings[TrendName.TEMPERATURE], readings[TrendName.PH],
                               readings[TrendName.ELECTRICAL_CONDUCTIVITY], readings[TrendName.SALINITY], readings[TrendName.TOTAL_DISSOLVED_SOLIDS])
                     temp = readings[TrendName.TEMPERATURE].convert(Unit.CELSIUS if metric else Unit.FAHRENHEIT)

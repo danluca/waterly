@@ -9,7 +9,7 @@ import pytz
 import json
 import threading
 
-from typing import Any
+from typing import Any, Callable
 from enum import StrEnum, Enum
 from datetime import datetime
 from pathlib import Path
@@ -65,18 +65,18 @@ class Settings(StrEnum):
     :type default: Any
     """
     HUMIDITY_TARGET_PERCENT = "humidity_target_percent", {"Z1":70.0, "Z2":70.0, "Z3":70.0}
-    WATERING_START_TIME = "watering_start_time", {"value":"20:30"}                            # 8:30pm
-    WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", {"value":10}
-    LAST_WATERING_DATE = "last_watering_date", {"value":None}
-    RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", {"value":50.0}   # 50%
-    UNITS = "units", {"value":UnitType.IMPERIAL}
-    WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", {"value":6*3600}       # 6 hours
-    WEATHER_CHECK_PRE_WATERING_SECONDS = "weather_check_pre_watering_seconds", {"value":30*60}    # 30 minutes
-    WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", {"value":None}
-    SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", {"value":60*10}            # 10 minutes
+    WATERING_START_TIME = "watering_start_time", "20:30"                            # 8:30pm
+    WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", 10
+    LAST_WATERING_DATE = "last_watering_date", None
+    RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 50.0   # 50%
+    UNITS = "units", UnitType.IMPERIAL
+    WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours
+    WEATHER_CHECK_PRE_WATERING_SECONDS = "weather_check_pre_watering_seconds", 30*60    # 30 minutes
+    WEATHER_LAST_CHECK_TIMESTAMP = "weather_last_check_timestamp", None
+    SENSOR_READ_INTERVAL_SECONDS = "sensor_read_interval_seconds", 60*10            # 10 minutes
     MINIMUM_SENSOR_HUMIDITY_PERCENT = "minimum_sensor_humidity_percent", {"Z1":30.0, "Z2":30.0, "Z3":30.0}
-    TREND_MAX_SAMPLES = "trend_max_samples", {"value":3000}                                  # ~ 1 month worth of samples
-    LOCAL_TIMEZONE = "local_timezone", {"value":DEFAULT_TIMEZONE.zone}
+    TREND_MAX_SAMPLES = "trend_max_samples", 3000                                  # ~ 1 month worth of samples
+    LOCAL_TIMEZONE = "local_timezone", DEFAULT_TIMEZONE.zone
     LOCATION = "location", {"longitude":DEFAULT_LONGITUDE, "latitude":DEFAULT_LATITUDE}
     GARDENING_SEASON = "gardening_season", {"start": "03-31", "stop": "10-31"}  # MM-DD (inclusive)
 
@@ -132,33 +132,18 @@ def __json_datetime_decoder(obj:dict[str, str]) -> datetime | dict[str, str]:
         tz = DEFAULT_TIMEZONE
     return tz.localize(datetime.fromisoformat(obj["iso"]).replace(tzinfo=None))
 
-def _json_default(o) -> dict[str, Any]:
+def _json_default(o) -> Any:
     """
-    Encodes an object to a JSON-compatible format. This function is used to provide a default
-    serialization behavior for config objects that are not inherently serializable by Python's
-    `json` library.
-
-    :param o: An object to serialize. Can include datetime instances, Enum instances, or other
-              arbitrary objects with attributes or string representations.
-    :type o: Any
-
-    :return: A JSON-compatible representation of the object. For datetime objects, it
-             produces an ISO string representation. For Enum instances, it provides
-             their values. Other objects fallback to their `__dict__` attribute or
-             string representation.
-    :rtype: Union[str, dict]
+    Encode objects that the json library can't handle by default.
+    Keeps primitives as-is, encodes datetime to a tagged dict, and maps Enums to their .value.
     """
-    # Datetime -> ISO string
+    # Datetime -> tagged dict
     if isinstance(o, datetime):
         return __json_datetime_encoder(o)
 
-    # Enum -> value
-    # noinspection PyBroadException
-    try:
-        if isinstance(o, Enum):
-            return {"value": o.value}
-    except Exception:
-        pass
+    # Enum -> store .value
+    if isinstance(o, Enum):
+        return getattr(o, "value", str(o))
 
     if isinstance(o, dict):
         return o
@@ -167,8 +152,8 @@ def _json_default(o) -> dict[str, Any]:
     if hasattr(o, "__dict__"):
         return o.__dict__
 
-    # Fallback to string representation
-    return {"value": str(o)}
+    # Primitives (int, float, str, bool, None) pass through
+    return o
 
 def _json_object_hook(obj: dict) -> Any:
     """
@@ -209,8 +194,8 @@ class AppConfig:
         # If no config provided, use factory defaults
         self._lock = threading.RLock()
         self.settings: dict[str, Any] = DEFAULT_SETTINGS.copy()
-        self._settings_file = f"{DATA_DIR}/settings.json"
-        self._persist_callback = None  # injected persistence (e.g., DB) to avoid circular import
+        self._settings_file: str = f"{DATA_DIR}/settings.json"
+        self._persist_callback: Callable[[Settings, Any], None]|None = None  # injected persistence (e.g., DB) to avoid circular import
 
     def __getitem__(self, arg: Settings) -> Any:
         if arg.name not in self.settings:
@@ -229,9 +214,15 @@ class AppConfig:
                 # Do not let persistence failures break config assignment
                 pass
 
+    def set_transient(self, key: Settings, value: Any):
+        self.settings[key.name] = AppConfig.__marshal__(key, value)
+
     def save_to_file(self):
         os.makedirs(os.path.dirname(self._settings_file), exist_ok=True)
         self._write_to_file()
+
+    def to_json(self):
+        return json.dumps(self.settings, indent=2, default=_json_default)
 
     def read_from_file(self):
         os.makedirs(os.path.dirname(self._settings_file), exist_ok=True)
@@ -241,42 +232,88 @@ class AppConfig:
     def init_item(self, item: Settings, value: dict[str, Any] = None):
         self.settings[item.name] = value if value else item.default
 
-    def set_persist_callback(self, callback):
+    def set_persist_callback(self, callback: Callable[[Settings, Any], None]):
         """
-        Inject a persistence callback with signature (setting: Settings, marshaled_value: dict[str, Any]) -> None
-        to persist changes outside this module (e.g., database).
+        Sets a callback function for persisting settings into DB upon modification.
+
+        :param callback: A callable function that accepts two parameters: a `Settings`
+            object and its corresponding value, and handles the persistence logic.
+        :type callback: Callable[[Settings, Any], None]
+        :return: None
         """
         with self._lock:
             self._persist_callback = callback
 
-    @staticmethod
-    def __unmarshal__(arg: Settings, value: dict[str, Any]) -> Any:
-        match arg:
-            case Settings.LOCAL_TIMEZONE:
-                return pytz.timezone(value["value"])
-            case _:
-                if "value" in value:
-                    return value["value"]
-                elif "__type__" in value:
-                    return _json_object_hook(value)
-                else:
-                    return value
+    def persist_all(self):
+        """
+        Persists all transient settings to the database.
+        """
+        if not callable(self._persist_callback):
+            return
+        with self._lock:
+            for setting, value in self.settings.items():
+                self._persist_callback(Settings[setting], value)
 
     @staticmethod
-    def __marshal__(arg: Settings, value: Any) -> dict[str, Any]:
+    def __unmarshal__(arg: Settings, value: Any) -> Any:
+        match arg:
+            case Settings.LOCAL_TIMEZONE:
+                v = value.get("value") if isinstance(value, dict) and "value" in value else value
+                return pytz.timezone(str(v))
+            case Settings.UNITS:
+                v = value.get("value") if isinstance(value, dict) and "value" in value else value
+                try:
+                    if isinstance(v, UnitType):
+                        return v
+                    if isinstance(v, str):
+                        if v.lower() in (UnitType.METRIC.value, UnitType.IMPERIAL.value):
+                            return UnitType(v.lower())
+                        if v.upper() in (UnitType.METRIC.name, UnitType.IMPERIAL.name):
+                            return UnitType[v.upper()]
+                except Exception:
+                    pass
+                # Fallback to default if not found or invalid
+                return UnitType.METRIC
+            case _:
+                if isinstance(value, dict) and "__type__" in value:
+                    return _json_object_hook(value)
+                if isinstance(value, dict) and "value" in value and len(value) == 1:
+                    return value["value"]
+                return value
+
+    @staticmethod
+    def __marshal__(arg: Settings, value: Any) -> Any:
         match arg:
             case Settings.LOCAL_TIMEZONE:
                 if isinstance(value, pytz.BaseTzInfo):
-                    return {"value": value.zone}
-                elif isinstance(value, dict):
-                    return value
+                    return value.zone
+                if isinstance(value, dict) and "value" in value:
+                    return str(value["value"])  # legacy wrapper
+                return str(value)
+            case Settings.UNITS:
+                # Flatten to lower-case string (UnitType.value)
+                if isinstance(value, dict) and "value" in value:
+                    v = value["value"]
                 else:
-                    return {"value": value}
+                    v = value
+                if isinstance(v, UnitType):
+                    return v.value
+                if isinstance(v, str):
+                    if v.upper() in (UnitType.METRIC.name, UnitType.IMPERIAL.name):
+                        return UnitType[v.upper()].value
+                    return v.lower()
+                return str(v).lower()
             case _:
-                if isinstance(value, dict) and "value" in value and len(value) == 1:
-                    return value
-                else:
+                # Datetime values get encoded to a JSON-friendly dict
+                if isinstance(value, datetime):
                     return _json_default(value)
+                # Legacy single-key wrapper -> unwrap
+                if isinstance(value, dict) and "value" in value and len(value) == 1:
+                    return value["value"]
+                # Already a special encoded object (e.g., datetime)
+                if isinstance(value, dict) and "__type__" in value:
+                    return value
+                return value
 
     def _read_from_file(self) -> bool:
         with self._lock:

@@ -4,13 +4,17 @@
 #
 
 import os
+import re
+import logging
+import json
 
 from datetime import datetime
-from flask import Flask, jsonify, request, render_template, send_from_directory, abort
+from pytz import timezone
+from flask import Flask, jsonify, request, render_template, send_from_directory, abort, Response
 from werkzeug.exceptions import HTTPException
 
 from .patch import PATCHES
-from .queues import send_message_to_scheduler
+from .queues import send_message_to_scheduler, QueueMessage, Action
 from .model.measurement import convert_measurement_unit_type
 from .model.times import valid_timezone, now_local
 from .model.units import UnitType
@@ -170,6 +174,150 @@ def get_latest_sensors():
         weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
         result["weather"] = weather
         return jsonify(result)
+
+# --------------------------
+# Settings page and Config API
+# --------------------------
+@app.get("/settings")
+@app.get("/settings.html")
+def settings_page():
+    directory = app.static_folder
+    # filename = "settings.html"
+    filename = "index.html"
+    if not os.path.exists(os.path.join(directory, filename)):
+        abort(404)
+    return send_from_directory(directory, filename, mimetype="text/html")
+
+
+@app.get("/api/config")
+def get_config():
+    # return jsonify(CONFIG.to_json())
+    return Response(CONFIG.to_json(), mimetype="application/json")
+
+@app.post("/api/config")
+def update_config():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        return jsonify({"error": "invalid_request", "message": "Expected JSON object"}), 400
+
+    changed = []
+    errors = []
+    def set_value(setting: Settings, value):
+        try:
+            CONFIG[setting] = value
+            changed.append(setting.name)
+        except Exception as e2:
+            errors.append({"setting": setting.name, "message": str(e2)})
+
+    # Map incoming modifiable fields to Settings - note the fields that have "last" in their name are not modifiable
+    if Settings.UNITS.name in body:
+        u = str(body[Settings.UNITS.name]).lower()
+        if u in (UnitType.METRIC.name, UnitType.IMPERIAL.name):
+            set_value(Settings.UNITS, UnitType[u])
+        elif u in (UnitType.METRIC.value, UnitType.IMPERIAL.value):
+            set_value(Settings.UNITS, UnitType(u))
+        else:
+            errors.append({"setting": Settings.UNITS, "message": f"Invalid value (use '{UnitType.METRIC.value}' or '{UnitType.IMPERIAL.value}')"})
+
+    if Settings.LOCAL_TIMEZONE.name in body:
+        # noinspection PyBroadException
+        try:
+            set_value(Settings.LOCAL_TIMEZONE, timezone(body[Settings.LOCAL_TIMEZONE.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.LOCAL_TIMEZONE, "message": f"Invalid timezone: {e}"})
+
+    if Settings.WATERING_START_TIME.name in body:
+        # Expect HH:MM 24h
+        val = str(body[Settings.WATERING_START_TIME.name]).strip()
+        if re.match(r'^\d{2}:\d{2}$', val):
+            set_value(Settings.WATERING_START_TIME, val)
+        else:
+            errors.append({"setting": Settings.WATERING_START_TIME, "message": f"Invalid format: {val}"})
+
+    if Settings.WATERING_MAX_MINUTES_PER_ZONE.name in body:
+        try:
+            set_value(Settings.WATERING_MAX_MINUTES_PER_ZONE, int(body[Settings.WATERING_MAX_MINUTES_PER_ZONE.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.WATERING_MAX_MINUTES_PER_ZONE, "message": f"Must be integer: {e}"})
+
+    if Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD.name in body:
+        try:
+            set_value(Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD, float(body[Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD, "message": f"Must be number: {e}"})
+
+    if Settings.SENSOR_READ_INTERVAL_SECONDS.name in body:
+        try:
+            set_value(Settings.SENSOR_READ_INTERVAL_SECONDS, int(body[Settings.SENSOR_READ_INTERVAL_SECONDS.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.SENSOR_READ_INTERVAL_SECONDS, "message": f"Must be integer: {e}"})
+
+    if Settings.WEATHER_CHECK_INTERVAL_SECONDS.name in body:
+        try:
+            set_value(Settings.WEATHER_CHECK_INTERVAL_SECONDS, int(body[Settings.WEATHER_CHECK_INTERVAL_SECONDS.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.WEATHER_CHECK_INTERVAL_SECONDS, "message": f"Must be integer: {e}"})
+
+    if Settings.WEATHER_CHECK_PRE_WATERING_SECONDS.name in body:
+        try:
+            set_value(Settings.WEATHER_CHECK_PRE_WATERING_SECONDS, int(body[Settings.WEATHER_CHECK_PRE_WATERING_SECONDS.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.WEATHER_CHECK_PRE_WATERING_SECONDS, "message": f"Must be integer: {e}"})
+
+    if Settings.LOCATION.name in body:
+        loc = body[Settings.LOCATION.name]
+        try:
+            lat = float(loc.get("latitude"))
+            lon = float(loc.get("longitude"))
+            set_value(Settings.LOCATION, {"latitude": lat, "longitude": lon})
+        except Exception as e:
+            errors.append({"setting": Settings.LOCATION, "message": f"latitude/longitude must be specified numeric values: {e}"})
+
+    if Settings.GARDENING_SEASON.name in body:
+        season = body[Settings.GARDENING_SEASON.name]
+        if isinstance(season, dict) and "start" in season and "stop" in season:
+            start = str(season["start"]).strip()
+            stop = str(season["stop"]).strip()
+            if re.match(r'^\d{2}-\d{2}$', start) and re.match(r'^\d{2}-\d{2}$', stop):
+                set_value(Settings.GARDENING_SEASON, {"start": start, "stop": stop})
+            else:
+                errors.append({"setting": Settings.GARDENING_SEASON, "message": f"Expect object with start, stop in pattern MM-DD: {season}"})
+        else:
+            errors.append({"setting": Settings.GARDENING_SEASON, "message": f"Expect object with start, stop (MM-DD): {season}"})
+
+    if Settings.HUMIDITY_TARGET_PERCENT.name in body:
+        h = body[Settings.HUMIDITY_TARGET_PERCENT.name]
+        if isinstance(h, dict):
+            set_value(Settings.HUMIDITY_TARGET_PERCENT, {k: float(v) for k, v in h.items()})
+        else:
+            errors.append({"setting": Settings.HUMIDITY_TARGET_PERCENT, "message": f"Expect object per zone: {{Z1: 70, ...}}: {h}"})
+
+    if Settings.TREND_MAX_SAMPLES.name in body:
+        try:
+            set_value(Settings.TREND_MAX_SAMPLES, int(body[Settings.TREND_MAX_SAMPLES.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.TREND_MAX_SAMPLES, "message": f"Must be integer: {e}"})
+
+    # Trigger save to disk (DB persistence already handled via callback)
+    try:
+        CONFIG.save_to_file()
+    except Exception as e:
+        # non-fatal
+        logging.getLogger(__name__).warning(f"Could not save CONFIG to file {e}")
+        pass
+
+    # Notify scheduler about config changes
+    if changed:
+        try:
+            msg = QueueMessage(Action.UPDATE_CONFIG)
+            send_message_to_scheduler(msg)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Could not send update config message to scheduler {e}")
+            pass
+
+    status = 200 if not errors else 207  # 207 Multi-Status for partial failures
+    obj = json.loads(CONFIG.to_json())
+    return jsonify({"updated": changed, "errors": errors, "config": obj}), status
 
 # --------------------------
 # Error handling

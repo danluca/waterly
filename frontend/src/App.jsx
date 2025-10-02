@@ -1,7 +1,7 @@
 // src/App.js
 import * as React from 'react';
 import {useEffect, useState} from "react";
-import {Card, CardContent, Typography, Grid, Box, Container} from '@mui/material';
+import {Card, CardContent, Typography, Grid, Box, Container, Link, Button} from '@mui/material';
 import {fetchSensors} from './api/sensors';
 import {fetchManifest} from './api/manifest';
 import YardIcon from '@mui/icons-material/Yard';
@@ -33,10 +33,16 @@ function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValu
     );
 }
 
+import SettingsPage from './pages/Settings';
+
 export default function App() {
     const [sensorData, setSensorData] = useState([]);
     const [manifest, setManifest] = useState(null);
     const currentYear = new Date().getFullYear();
+    const path = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '/';
+    if (path.startsWith('/settings')) {
+        return <SettingsPage/>;
+    }
     useEffect(() => {
         fetchSensors().then(setSensorData);
     }, []);
@@ -95,9 +101,12 @@ export default function App() {
                 />
             </Box>
 
-            <Typography variant="h5" sx={{mb: 2}}>
-                Latest readings
-            </Typography>
+            <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2}}>
+                <Typography variant="h5">
+                    Latest readings
+                </Typography>
+                <Link href="/settings" underline="hover" sx={{position:'absolute', right:32, backgroundColor:'#fff', fontFamily: 'Roboto', fontWeight: 400, p: '6px 10px', border: '1px solid', borderColor: 'divider', borderRadius: 1, boxShadow: 2, transition: 'background-color 0.2s ease', '&:hover': { backgroundColor: '#FFE8CC' }}}>Settings</Link>
+            </Box>
             <Grid container spacing={2}>
                 {(() => {
                     // Only include actual zones with names; handle weather separately

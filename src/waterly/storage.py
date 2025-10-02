@@ -172,9 +172,9 @@ def get_config_from_db() -> AppConfig:
         #parse into CONFIG structure
         for setting in Settings:
             if setting.name in raw_settings:
-                CONFIG[setting] = json.loads(raw_settings[setting.name])
+                CONFIG.set_transient(setting, json.loads(raw_settings[setting.name]))
             else:
-                CONFIG[setting] = setting.default
+                CONFIG.set_transient(setting, setting.default)
                 cur.execute("INSERT INTO config(type, value) VALUES (?, ?)", (setting.name, json.dumps(setting.default)))
                 conn.commit()
         return CONFIG

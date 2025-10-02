@@ -1,0 +1,35 @@
+{
+  "HUMIDITY_TARGET_PERCENT": {
+    "Z1": 99.0,
+    "Z2": 70.0,
+    "Z3": 70.0
+  },
+  "WATERING_START_TIME": "20:30",
+  "WATERING_MAX_MINUTES_PER_ZONE": 10,
+  "LAST_WATERING_DATE": "2025-09-30",
+  "RAIN_CANCEL_PROBABILITY_THRESHOLD": 50,
+  "UNITS": "imperial",
+  "WEATHER_CHECK_INTERVAL_SECONDS": 21600,
+  "WEATHER_CHECK_PRE_WATERING_SECONDS": 1800,
+  "WEATHER_LAST_CHECK_TIMESTAMP": {
+    "__type__": "datetime",
+    "iso": "2025-09-30T20:00:02.521569-05:00",
+    "tz": "America/Chicago"
+  },
+  "SENSOR_READ_INTERVAL_SECONDS": 900,
+  "MINIMUM_SENSOR_HUMIDITY_PERCENT": {
+    "Z1": 30.0,
+    "Z2": 30.0,
+    "Z3": 30.0
+  },
+  "TREND_MAX_SAMPLES": 36000,
+  "LOCAL_TIMEZONE": "America/Chicago",
+  "LOCATION": {
+    "longitude": -93.45025,
+    "latitude": 45.031667
+  },
+  "GARDENING_SEASON": {
+    "start": "03-31",
+    "stop": "10-31"
+  }
+}
