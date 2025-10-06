@@ -175,6 +175,53 @@ def get_latest_sensors():
         result["weather"] = weather
         return jsonify(result)
 
+@app.post("/api/water/<string:zone_name>/start")
+def api_start_watering(zone_name: str):
+    # Validate zone exists
+    patch = next((p for p in PATCHES if p.zone.name == zone_name), None)
+    if patch is None:
+        return jsonify({"error": "not_found", "message": f"Zone '{zone_name}' not found"}), 404
+
+    body = request.get_json(silent=True) or {}
+    minutes = body.get("minutes") if isinstance(body, dict) else None
+    if minutes is None:
+        minutes = request.args.get("minutes")
+    # Validate minutes if provided
+    if minutes is not None:
+        try:
+            minutes = int(minutes)
+            if minutes <= 0:
+                raise ValueError("minutes must be > 0")
+        except Exception as e:
+            return jsonify({"error": "invalid_request", "message": f"Invalid 'minutes' value: {e}"}), 400
+
+    try:
+        msg = QueueMessage(Action.START_WATERING, {"zone": zone_name, "minutes": minutes})
+        send_message_to_scheduler(msg)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to enqueue start watering message: {e}")
+        return jsonify({"error": "internal_error", "message": "Could not submit watering request"}), 500
+
+    return jsonify({"status": "accepted", "zone": zone_name, "minutes": minutes}), 202
+
+
+@app.post("/api/water/<string:zone_name>/stop")
+def api_stop_watering(zone_name: str):
+    # Validate zone exists
+    patch = next((p for p in PATCHES if p.zone.name == zone_name), None)
+    if patch is None:
+        return jsonify({"error": "not_found", "message": f"Zone '{zone_name}' not found"}), 404
+
+    try:
+        msg = QueueMessage(Action.STOP_WATERING, {"zone": zone_name})
+        send_message_to_scheduler(msg)
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Failed to enqueue stop watering message: {e}")
+        return jsonify({"error": "internal_error", "message": "Could not submit stop request"}), 500
+
+    return jsonify({"status": "accepted", "zone": zone_name}), 202
+
+
 # --------------------------
 # Settings page and Config API
 # --------------------------

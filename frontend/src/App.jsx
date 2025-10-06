@@ -1,7 +1,7 @@
 // src/App.js
 import * as React from 'react';
 import {useEffect, useState} from "react";
-import {Card, CardContent, Typography, Grid, Box, Container, Link, Button} from '@mui/material';
+import {Card, CardContent, Typography, Grid, Box, Container, Link, Button, Dialog, DialogTitle, DialogContent, DialogActions, TextField, Checkbox, FormControlLabel, Stack, CircularProgress} from '@mui/material';
 import {fetchSensors} from './api/sensors';
 import {fetchManifest} from './api/manifest';
 import YardIcon from '@mui/icons-material/Yard';
@@ -9,9 +9,10 @@ import WavesIcon from '@mui/icons-material/Waves';
 
 const fmt = (v) => (typeof v === 'number' ? v.toLocaleString(undefined, {maximumFractionDigits: 2}) : v);
 
-function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValue, secondaryUnit, bgColor}) {
+function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValue, secondaryUnit, bgColor, onClick}) {
+    const hoverSx = onClick ? {'&:hover': { backgroundColor: '#FFE8CC' }} : {};
     return (
-        <Card variant="outlined" sx={{width: 240, height: 160, display: 'flex', flexDirection: 'column', backgroundColor: bgColor}}>
+        <Card variant="outlined" onClick={onClick} sx={{width: 240, height: 160, display: 'flex', flexDirection: 'column', backgroundColor: bgColor, cursor: onClick ? 'pointer' : 'default', transition: 'background-color 0.2s ease', ...hoverSx}}>
             <CardContent sx={{display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%'}}>
                 <div>
                     <Typography variant="overline" color="text.secondary">
@@ -36,6 +37,14 @@ function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValu
 import SettingsPage from './pages/Settings';
 
 export default function App() {
+    // Watering dialog state
+    const [waterDialogOpen, setWaterDialogOpen] = useState(false);
+    const [selectedZone, setSelectedZone] = useState(null);
+    const [limitEnabled, setLimitEnabled] = useState(true);
+    const [minutes, setMinutes] = useState('10');
+    const [starting, setStarting] = useState(false);
+    const [started, setStarted] = useState(false);
+    const [errorMsg, setErrorMsg] = useState('');
     const [sensorData, setSensorData] = useState([]);
     const [manifest, setManifest] = useState(null);
     const currentYear = new Date().getFullYear();
@@ -49,6 +58,55 @@ export default function App() {
     useEffect(() => {
         fetchManifest().then(setManifest);
     }, []);
+
+    // Handlers for watering dialog
+    const openWaterDialog = (zone) => {
+        setSelectedZone(zone);
+        setWaterDialogOpen(true);
+        setStarted(false);
+        setStarting(false);
+        setErrorMsg('');
+    };
+    const closeWaterDialog = () => {
+        setWaterDialogOpen(false);
+        setSelectedZone(null);
+        setStarting(false);
+        setErrorMsg('');
+    };
+    const handleStart = async () => {
+        if (!selectedZone) return;
+        setStarting(true);
+        setErrorMsg('');
+        try {
+            const url = `/api/water/${encodeURIComponent(selectedZone.name)}/start` + (limitEnabled && minutes ? `?minutes=${encodeURIComponent(parseInt(minutes||'0',10))}` : '');
+            const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}});
+            if (!(resp.ok || resp.status === 202)) {
+                const txt = await resp.text();
+                throw new Error(txt || `HTTP ${resp.status}`);
+            }
+            setStarted(true);
+        } catch (e) {
+            setErrorMsg(String(e));
+        } finally {
+            setStarting(false);
+        }
+    };
+    const handleStop = async () => {
+        if (!selectedZone) return;
+        setErrorMsg('');
+        try {
+            const url = `/api/water/${encodeURIComponent(selectedZone.name)}/stop`;
+            const resp = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}});
+            if (!(resp.ok || resp.status === 202)) {
+                const txt = await resp.text();
+                throw new Error(txt || `HTTP ${resp.status}`);
+            }
+            setStarted(false);
+            closeWaterDialog();
+        } catch (e) {
+            setErrorMsg(String(e));
+        }
+    };
 
     // Refresh sensors periodically every 17 minutes (1020000 ms)
     useEffect(() => {
@@ -164,6 +222,7 @@ export default function App() {
                                                             secondaryValue={zone.water}
                                                             secondaryUnit={`${zone.water_unit}${zone.last_watering != null ? ` @ ${zone.last_watering}` : ''}`}
                                                             bgColor={zone.water_state ? '#cae7fc' : undefined}
+                                                            onClick={() => openWaterDialog(zone)}
                                                         />
                                                     </Grid>
                                                 )}
@@ -247,6 +306,28 @@ export default function App() {
                 </a>
                 </Typography>
             </Box>
+
+            <Dialog open={waterDialogOpen} onClose={closeWaterDialog} fullWidth maxWidth="xs">
+                <DialogTitle>
+                    {`Water ${selectedZone?.desc || selectedZone?.name || ''}`}
+                </DialogTitle>
+                <DialogContent>
+                    <Stack spacing={1.25} sx={{mt: 0.5}}>
+                        <FormControlLabel control={<Checkbox checked={limitEnabled} onChange={(e)=>setLimitEnabled(e.target.checked)} />} label="Enable time limit" />
+                        <TextField type="number" label="Minutes" size="small" value={minutes} onChange={(e)=>setMinutes(e.target.value)} disabled={!limitEnabled} inputProps={{min:1}} />
+                        {errorMsg && (
+                            <Typography variant="body2" color="error" sx={{mt:0.5}}>{errorMsg}</Typography>
+                        )}
+                    </Stack>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={closeWaterDialog}>Cancel</Button>
+                    <Button onClick={handleStop} disabled={!started}>Stop watering</Button>
+                    <Button variant="contained" onClick={handleStart} disabled={starting}>
+                        {starting ? (<><CircularProgress size={16} sx={{mr:1}}/>Starting...</>) : 'Start watering'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
 
         </Container>
     );

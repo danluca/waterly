@@ -11,6 +11,8 @@ __scheduler_queue = queue.Queue()
 
 class Action(Enum):
     UPDATE_CONFIG = 1
+    START_WATERING = 2
+    STOP_WATERING = 3
 
 class QueueMessage:
     """

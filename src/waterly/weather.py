@@ -110,12 +110,12 @@ class WeatherService:
             next_12h_soil_humidity += w.soil_humidity.value
         precip_unit: Unit = next_12h_data[-1].precipitation_amount.unit
         self._logger.info(f"Weather Data points: Past 12h: {past_data_points}, Future 12h: {future_data_points}")
-        self._logger.info(f"Weather Data assessment: Past 12h rain: {past_12h_rain:.2f} {precip_unit}, Future 12h rain: {next_12h_rain:.2f} {precip_unit} with {next_12h_prob:.2f}% chance")
+        self._logger.info(f"Weather Data assessment: Past 12h rain: {past_12h_rain:.3f} {precip_unit}, Future 12h rain: {next_12h_rain:.3f} {precip_unit} with {next_12h_prob:.2f}% chance")
         past_12h_soil_humidity /= past_data_points if past_data_points > 0 else 1.0
         next_12h_soil_humidity /= future_data_points if future_data_points > 0 else 1.0
         self._logger.info(f"Weather Data assessment: Past 12h average soil humidity: {past_12h_soil_humidity*100.0:.2f}%, Future 12h average soil humidity: {next_12h_soil_humidity*100.0:.2f}%")
         rain_12_threshold = convert_measurement(self.RAIN_12H_THRESHOLD_INCHES, Unit.INCHES, precip_unit)
-        should_not_water = past_12h_rain > rain_12_threshold or (next_12h_prob > self._precip_prob_threshold and next_12h_rain > rain_12_threshold)
+        should_not_water = past_12h_rain >= rain_12_threshold or (next_12h_prob >= self._precip_prob_threshold and next_12h_rain >= rain_12_threshold)
         rationale = {"past12h": {"rain": past_12h_rain, "rain_threshold": rain_12_threshold, "unit": precip_unit, "data_points": past_data_points,},
                      "next12h": {"prob": next_12h_prob, "prob_threshold": self._precip_prob_threshold, "rain": next_12h_rain,
                                  "rain_threshold": rain_12_threshold, "unit": precip_unit, "data_points": future_data_points,}

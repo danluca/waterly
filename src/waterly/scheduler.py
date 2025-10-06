@@ -56,6 +56,8 @@ class WateringManager:
         self._start_time: dtime = dtime(hh, mm)
         self._max_minutes: int = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
         self._logger = logging.getLogger(__name__)
+        self._manual_mode: dict = {}
+        self._last_sensor_poll: int = 0
 
     def start(self):
         """
@@ -113,6 +115,22 @@ class WateringManager:
             return t >= start_md or t <= end_md
 
     def _handle_thread_messages(self):
+        """
+        Handles messages received from the scheduler thread and performs
+        corresponding actions such as updating configuration, starting watering,
+        and logging relevant information.
+
+        This method monitors the message queue for incoming messages and processes
+        each message based on its action type. When receiving an UPDATE_CONFIG action,
+        it updates various configuration parameters and patch settings. For the
+        START_WATERING action, it processes data to initiate watering manually for a
+        specific zone and duration.
+
+        This method is called repeatedly from the thread loop (see _run method).
+
+        :raises Exception: Logs any unhandled exceptions internally and maintains
+                           the method flow.
+        """
         # noinspection PyBroadException
         try:
             msg: QueueMessage|None = receive_scheduler_message()
@@ -125,60 +143,293 @@ class WateringManager:
                 self._start_time = dtime(hh, mm)
                 self._max_minutes = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
                 self._last_watering_date = CONFIG[Settings.LAST_WATERING_DATE]
+                for p in self.patches:
+                    p.min_sensor_humidity = CONFIG[Settings.MINIMUM_SENSOR_HUMIDITY_PERCENT][p.zone.name]
+                    p.target_humidity = CONFIG[Settings.HUMIDITY_TARGET_PERCENT][p.zone.name]
+            elif msg.action == Action.START_WATERING:
+                data = msg.data or {}
+                zone_name = str(data.get("zone") or "").strip()
+                minutes = data.get("minutes")
+                # noinspection PyBroadException
+                try:
+                    minutes = int(minutes) if minutes is not None else None
+                except Exception:
+                    minutes = None
+                if not zone_name:
+                    self._logger.warning("START_WATERING message missing 'zone' name - ignoring request")
+                    return
+                patch = next((p for p in self.patches if p.zone.name == zone_name), None)
+                if patch is None:
+                    self._logger.warning(f"START_WATERING could not find zone '{zone_name}' - ignoring request")
+                    return
+                self._logger.info(f"Manual start watering request accepted for zone {zone_name} for {minutes or self._max_minutes} minutes")
+                self._manual_mode[zone_name] = {"state": "accepted", "duration": minutes or self._max_minutes}
+            elif msg.action == Action.STOP_WATERING:
+                data = msg.data or {}
+                zone_name = str(data.get("zone") or "").strip()
+                if not zone_name:
+                    self._logger.warning("STOP_WATERING message missing 'zone' name - ignoring request")
+                    return
+                patch = next((p for p in self.patches if p.zone.name == zone_name), None)
+                if patch is None:
+                    self._logger.warning(f"STOP_WATERING could not find zone '{zone_name}' - ignoring request")
+                    return
+                info = self._manual_mode.get(zone_name, {}) or {}
+                state = info.get("state")
+                now_ts = int(time.time())
+                metric: bool = CONFIG[Settings.UNITS] == UnitType.METRIC
+                water_unit = Unit.LITERS if metric else Unit.GALLONS
+                # If running, finalize and record; if preparing/accepted, cancel without record
+                if state == "running":
+                    try:
+                        patch.stop_watering()
+                        stop_ts = now_ts
+                        humid_stop = patch.humidity()
+                        patch.close_sensor_bus()
+                        water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit)
+                        start_h = info.get("humid_start")
+                        duration = max(0, stop_ts - int(info.get("start_ts", stop_ts)))
+                        msmt = WateringMeasurement(datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]), water_amount, water_unit,
+                                                   getattr(start_h, 'value', 0.0), getattr(humid_stop, 'value', 0.0), duration)
+                        try:
+                            record_watering_assessment(info.get("weather_assessment"))
+                            record_watering(patch.zone.name, msmt)
+                            record_waterlog(WateringRecord(patch.zone, True, msmt), info.get("weather_assessment"))
+                        except Exception as e:
+                            self._logger.error(f"Failed to record STOP_WATERING measurements for zone {patch.zone.name}: {e}", exc_info=True)
+                        m, s = divmod(duration, 60)
+                        self._logger.info(f"Manual watering STOP for zone {zone_name} at {humid_stop.value:.2f}% RH after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit}")
+                    finally:
+                        self._manual_mode.pop(zone_name, None)
+                else:
+                    # Not running; just ensure everything is closed and stopped
+                    patch.stop_watering()
+                    patch.close_sensor_bus()
+                    self._manual_mode.pop(zone_name, None)
+                    self._logger.info(f"Manual watering STOP for zone {zone_name} acknowledged (not running)")
         except Exception as e:
             self._logger.error(f"Failed to handle scheduler message: {e}", exc_info=True)
             pass
 
+    def _handle_sensor_polling(self):
+        """
+        Handles the periodic polling of sensors.
+
+        This method is called repeatedly from the thread loop (see _run method) - checks the time elapsed since the last
+        sensor polling and invokes the sensor polling routine if the polling interval has been
+        exceeded. It ensures that sensors are periodically polled based on a predefined interval.
+
+        :rtype: None
+        """
+        epoch = int(time.time())
+        poll_interval: int = int(CONFIG[Settings.SENSOR_READ_INTERVAL_SECONDS])
+        # Poll sensors periodically
+        if epoch - self._last_sensor_poll >= poll_interval:
+            self._poll_sensors()
+            self._last_sensor_poll = epoch
+
+    def _handle_auto_watering(self):
+        """
+        Checks and handles the automatic garden watering process. This method ensures that
+        the watering is performed only once per day, taking into account various conditions
+        such as the current time, gardening season, weather assessment, and drought status.
+
+        This function performs the following logic:
+        - Verifies if the current time is past the start time for watering.
+        - Validates if the current date falls within the defined gardening season. If not, watering is skipped with a
+          recorded assessment of the reason.
+        - Checks weather conditions and determines if watering is required. Assessment is made using weather data and
+          drought conditions.
+        - Executes watering if conditions are favorable and updates the configuration with the last watering date.
+        - Skips watering if conditions do not meet the criteria and logs relevant information.
+
+        This method is called repeatedly from the thread loop (see _run method).
+
+        :rtype: None
+        """
+        # Check if it's time to water (once per day)
+        now = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
+        today_key = now.strftime("%Y-%m-%d")
+        if self._last_watering_date != today_key:
+            if now.time() >= self._start_time:
+                if not self._is_in_gardening_season(now):
+                    msg = f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON].get('start')} to {CONFIG[Settings.GARDENING_SEASON].get('end')}"
+                    self._logger.warning(f"Skipping watering - current time {now.isoformat()} is {msg}")
+                    self._last_watering_date = today_key
+                    CONFIG[Settings.LAST_WATERING_DATE] = today_key
+                    record_watering_assessment(WateringAssessment(enabled=False, reason={"warn": msg}, start_time=now))
+                    return
+                # weather assessment
+                has_drought = any(patch.has_drought() for patch in self.patches)
+                weather_assessment = self.weather.should_water_garden()
+                weather_assessment.reason["drought"] = has_drought
+                weather_assessment.enabled = weather_assessment.enabled or has_drought
+                # persist current assessment
+                record_watering_assessment(weather_assessment)
+                # Decide if we cancel due to weather
+                if weather_assessment.enabled:
+                    self._logger.info("Weather data enables watering")
+                    self._perform_watering(weather_assessment)
+                    CONFIG[Settings.LAST_WATERING_DATE] = today_key
+                    self._last_watering_date = today_key
+                else:
+                    self._logger.info("Watering canceled due to weather current conditions and forecast")
+                    CONFIG[Settings.LAST_WATERING_DATE] = today_key
+                    self._last_watering_date = today_key
+
+    def _handle_manual_watering(self):
+        """
+        Non-blocking manual watering state machine.
+
+        This method is called repeatedly from the thread loop (see _run).
+        When a START_WATERING message is received, _handle_thread_messages places an entry
+        in self._manual_mode[zone_name] = {"state": "accepted", "duration": minutes or max}.
+
+        Here we progress each zone through states without sleeping:
+        - accepted → preparing: stop other zones; set grace window to allow valves to close
+        - preparing → running: after grace, open bus, reset pulses, capture start humidity, start watering
+        - running → finalize: when duration reached or target humidity reached; stop/close and persist records
+        """
+        if not self._manual_mode:
+            return
+
+        now_ts = int(time.time())
+        metric: bool = CONFIG[Settings.UNITS] == UnitType.METRIC
+        water_unit = Unit.LITERS if metric else Unit.GALLONS
+
+        zones = list(self._manual_mode.keys())
+        for zone_name in zones:
+            info = self._manual_mode.get(zone_name) or {}
+            try:
+                patch = next((p for p in self.patches if p.zone.name == zone_name), None)
+                if patch is None:
+                    self._logger.warning(f"Manual watering requested for unknown zone '{zone_name}', discarding")
+                    del self._manual_mode[zone_name]
+                    continue
+
+                # Initialize defaults
+                state = info.get("state", "accepted")
+                requested_minutes = info.get("duration")
+                # noinspection PyBroadException
+                try:
+                    requested_minutes = int(requested_minutes) if requested_minutes is not None else None
+                except Exception:
+                    requested_minutes = None
+                max_minutes = self._max_minutes if requested_minutes is None else max(1, min(int(requested_minutes), int(self._max_minutes)))
+                info["max_minutes"] = max_minutes
+
+                if state == "accepted":
+                    # Move to preparing: stop other zones and wait a short grace period for valves to close.
+                    self._logger.info(f"Manual watering accepted for zone {zone_name}; preparing to start (up to {max_minutes} min)")
+                    stopped_any = False
+                    for p in self.patches:
+                        if p.zone.name != patch.zone.name and p.water_state:
+                            p.stop_watering()
+                            stopped_any = True
+                    # Set the grace window if we had to stop others, otherwise minimal delay
+                    grace_sec = 10 if stopped_any else 0
+                    info.update({
+                        "state": "preparing",
+                        "grace_until": now_ts + grace_sec,
+                        "weather_assessment": WateringAssessment(start_time=datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]), reason={"manual": True, "zone": zone_name}, enabled=True)
+                    })
+                    self._manual_mode[zone_name] = info
+                    continue
+
+                if state == "preparing":
+                    if now_ts < int(info.get("grace_until", now_ts)):
+                        # Still within grace period; wait for the next tick
+                        continue
+                    # Start the watering sequence (non-blocking)
+                    try:
+                        patch.open_sensor_bus()
+                    except Exception as e:
+                        # try to continue even if open fails; log and abort this run
+                        self._logger.error(f"Failed to open sensor bus for zone {zone_name}: {e}", exc_info=True)
+                        del self._manual_mode[zone_name]
+                        continue
+                    self.pulses.reset_count()
+                    humid_start = patch.humidity()
+                    info["humid_start"] = humid_start
+                    patch.start_watering()
+                    info.update({
+                        "state": "running",
+                        "start_ts": now_ts
+                    })
+                    self._logger.info(f"Manual watering started for zone {zone_name} at {humid_start.value:.2f}% RH")
+                    self._manual_mode[zone_name] = info
+                    continue
+
+                if state == "running":
+                    start_ts = int(info.get("start_ts", now_ts))
+                    elapsed = now_ts - start_ts
+                    time_exceeded = elapsed >= (int(info.get("max_minutes", self._max_minutes)) * 60)
+                    if time_exceeded:
+                        # Finalize watering and persist records
+                        patch.stop_watering()
+                        stop_ts = now_ts
+                        humid_stop = patch.humidity()
+                        # noinspection PyBroadException
+                        try:
+                            patch.close_sensor_bus()
+                        except Exception:
+                            pass
+                        water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit)
+                        start_h = info.get("humid_start")
+                        duration = max(0, stop_ts - int(info.get("start_ts", stop_ts)))
+                        msmt = WateringMeasurement(datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]), water_amount, water_unit,
+                                                   getattr(start_h, 'value', 0.0), getattr(humid_stop, 'value', 0.0), duration)
+                        try:
+                            record_watering_assessment(info.get("weather_assessment"))
+                            record_watering(patch.zone.name, msmt)
+                            record_waterlog(WateringRecord(patch.zone, True, msmt), info.get("weather_assessment"))
+                        except Exception as e:
+                            self._logger.error(f"Failed to record manual watering measurements for zone {patch.zone.name}: {e}", exc_info=True)
+                        m, s = divmod(duration, 60)
+                        self._logger.info(f"Manual watering finished for zone {zone_name} at {humid_stop.value:.2f}% RH after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit} of water")
+                        # Cleanup
+                        del self._manual_mode[zone_name]
+                        continue
+
+                # Keep entry if running and not done
+                self._manual_mode[zone_name] = info
+
+            except Exception as e:
+                self._logger.error(f"Manual watering handler error for zone {zone_name}: {e}", exc_info=True)
+                # Best-effort cleanup to keep loop healthy
+                # noinspection PyBroadException
+                try:
+                    patch = next((p for p in self.patches if p.zone.name == zone_name), None)
+                    if patch is not None:
+                        patch.stop_watering()
+                        patch.close_sensor_bus()
+                except Exception:
+                    pass
+                self._manual_mode.pop(zone_name, None)
+        
+
     def _run(self):
         """
         Monitors and manages periodic sensor polling, orchestrates the daily watering
-        schedule based on environmental conditions such as humidity, rainfall forecast,
-        and time of the day. Ensures optimal watering decisions by integrating sensor
-        readings and external weather predictions.
+        schedule.
+
+        This method loops continuously every 15 seconds through various events such as sensor polling,
+        watering, and thread messages.
 
         :raises RuntimeError: If the function is called in an unsupported context.
         """
         self._logger.info("Starting WateringManager")
         # Sensors polling loop and daily schedule orchestration
-        last_poll:int = 0
         while not self._stop.is_set():
             self._handle_thread_messages()
-            epoch = int(time.time())
-            poll_interval:int = int(CONFIG[Settings.SENSOR_READ_INTERVAL_SECONDS])
-            # Poll sensors periodically
-            if epoch - last_poll >= poll_interval:
-                self._poll_sensors()
-                last_poll = epoch
-            # Check if it's time to water (once per day)
-            now = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
-            today_key = now.strftime("%Y-%m-%d")
-            if self._last_watering_date != today_key:
-                if now.time() >= self._start_time:
-                    if not self._is_in_gardening_season(now):
-                        msg = f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON].get('start')} to {CONFIG[Settings.GARDENING_SEASON].get('end')}"
-                        self._logger.warning(f"Skipping watering - current time {now.isoformat()} is {msg}")
-                        self._last_watering_date = today_key
-                        CONFIG[Settings.LAST_WATERING_DATE] = today_key
-                        record_watering_assessment(WateringAssessment(enabled=False, reason={"warn": msg}, start_time=now))
-                        continue
-                    # weather assessment
-                    has_drought = any(patch.has_drought() for patch in self.patches)
-                    weather_assessment = self.weather.should_water_garden()
-                    weather_assessment.reason["drought"] = has_drought
-                    weather_assessment.enabled = weather_assessment.enabled or has_drought
-                    # persist current assessment
-                    record_watering_assessment(weather_assessment)
-                    # Decide if we cancel due to weather
-                    if weather_assessment.enabled:
-                        self._logger.info("Weather data enables watering")
-                        self._perform_watering(weather_assessment)
-                        CONFIG[Settings.LAST_WATERING_DATE] = today_key
-                        self._last_watering_date = today_key
-                    else:
-                        self._logger.info("Watering canceled due to weather current conditions and forecast")
-                        CONFIG[Settings.LAST_WATERING_DATE] = today_key
-                        self._last_watering_date = today_key
-            self._stop.wait(30.0)
+
+            self._handle_sensor_polling()
+
+            self._handle_manual_watering()  # we give priority to manually invoked watering
+
+            self._handle_auto_watering()
+
+            self._stop.wait(15.0)
 
     def _poll_sensors(self):
         """
@@ -229,6 +480,8 @@ class WateringManager:
         humidity and the maximum allowed time per zone. The process involves sequentially
         watering the patches, monitoring the humidity, and calculating the water usage for
         each zone. Once the watering process is complete, all patches are turned off.
+
+        This method is blocking and will wait for the watering to complete before returning.
 
         :param weather_assessment: watering assessment object of the weather forecast - used for record keeping, does not affect watering
         :type weather_assessment: WateringAssessment
