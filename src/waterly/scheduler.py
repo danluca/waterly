@@ -368,6 +368,7 @@ class WateringManager:
                         # Finalize watering and persist records
                         patch.stop_watering()
                         stop_ts = now_ts
+                        patch.open_sensor_bus()     # ensure the bus is open for final readings (a poll sensor call while in running state would close the bus)
                         humid_stop = patch.humidity()
                         # noinspection PyBroadException
                         try:
