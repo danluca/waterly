@@ -184,6 +184,9 @@ export default function App() {
                                     {key: 'temperature', label: 'Temperature', unitKey: 'temperature_unit'},
                                     {key: 'humidity', label: 'Humidity', unitKey: 'humidity_unit'},
                                     {key: 'ph', label: 'pH', unitKey: 'ph_unit'},
+                                    {key: 'nitrogen', label: 'N', unitKey: 'nitrogen_unit'},
+                                    {key: 'phosphorus', label: 'P', unitKey: 'phosphorus_unit'},
+                                    {key: 'potassium', label: 'K', unitKey: 'potassium_unit'},
                                     {key: 'rpitemp', label: 'Temperature', unitKey: 'rpitemp_unit'},
                                 ];
                                 const metrics = metricDefs.filter(m => zone[m.key] !== undefined);
