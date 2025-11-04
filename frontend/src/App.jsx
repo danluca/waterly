@@ -12,7 +12,7 @@ const fmt = (v) => (typeof v === 'number' ? v.toLocaleString(undefined, {maximum
 function SensorCard({title, value, unit, subtitle, secondaryLabel, secondaryValue, secondaryUnit, bgColor, onClick}) {
     const hoverSx = onClick ? {'&:hover': { backgroundColor: '#FFE8CC' }} : {};
     return (
-        <Card variant="outlined" onClick={onClick} sx={{width: 240, height: 160, display: 'flex', flexDirection: 'column', backgroundColor: bgColor, cursor: onClick ? 'pointer' : 'default', transition: 'background-color 0.2s ease', ...hoverSx}}>
+        <Card variant="outlined" onClick={onClick} sx={{width: 230, height: 160, display: 'flex', flexDirection: 'column', backgroundColor: bgColor, cursor: onClick ? 'pointer' : 'default', transition: 'background-color 0.2s ease', ...hoverSx}}>
             <CardContent sx={{display: 'flex', flexDirection: 'column', justifyContent: 'space-between', height: '100%'}}>
                 <div>
                     <Typography variant="overline" color="text.secondary">
@@ -170,31 +170,45 @@ export default function App() {
                     // Only include actual zones with names; handle weather separately
                     const weather = sensorData?.weather;
                     const zones = Object.values(sensorData || {}).filter(z => z && z.name);
-                    const isRpiZone = (z) => z?.name === 'RPI' || /raspberry\s*pi/i.test(z?.desc || '');
+                    // Group special cards (RPI and ENV) at the end, keeping RPI before ENV
+                    const specialRank = (z) => {
+                        const n = (z?.name || '').toUpperCase();
+                        if (n === 'RPI') return 1; // RPI first among special
+                        if (n === 'ENV') return 2; // ENV after RPI
+                        return 0; // normal zones first
+                    };
                     zones.sort((a, b) => {
-                        const ar = isRpiZone(a), br = isRpiZone(b);
-                        if (ar && !br) return 1;
-                        if (!ar && br) return -1;
+                        const ra = specialRank(a), rb = specialRank(b);
+                        if (ra !== rb) return ra - rb;
                         return String(a?.name || '').localeCompare(String(b?.name || ''));
                     });
                     return (
                         <>
                             {zones.map((zone) => {
                                 const metricDefs = [
+                                    // Zone metrics
                                     {key: 'temperature', label: 'Temperature', unitKey: 'temperature_unit'},
                                     {key: 'humidity', label: 'Humidity', unitKey: 'humidity_unit'},
                                     {key: 'ph', label: 'pH', unitKey: 'ph_unit'},
                                     {key: 'nitrogen', label: 'N', unitKey: 'nitrogen_unit'},
                                     {key: 'phosphorus', label: 'P', unitKey: 'phosphorus_unit'},
                                     {key: 'potassium', label: 'K', unitKey: 'potassium_unit'},
+                                    // Raspberry Pi internal temp
                                     {key: 'rpitemp', label: 'Temperature', unitKey: 'rpitemp_unit'},
+                                    // Environment metrics (external sensor)
+                                    {key: 'envtemp', label: 'Temperature', unitKey: 'envtemp_unit'},
+                                    {key: 'envhumidity', label: 'Humidity', unitKey: 'envhumidity_unit'},
                                 ];
                                 const metrics = metricDefs.filter(m => zone[m.key] !== undefined);
                                 const hasWater = zone.water !== undefined || zone.total_water !== undefined;
 
-                                // Backgrounds: Z1-Z3 pale green, RPI pale raspberry
-                                const isRpi = isRpiZone(zone);
-                                const zoneBg = isRpi ? '#FCE4EC' : '#E8F5E9'; // raspberry-ish vs pale green
+                                // Backgrounds: Z* pale green, RPI pale raspberry, ENV pale cyan
+                                const zoneBg = (() => {
+                                    const n = String(zone?.name || '').toUpperCase();
+                                    if (n === 'RPI') return '#FCE4EC'; // raspberry-ish
+                                    if (n === 'ENV') return '#E0F7FA'; // pale cyan
+                                    return '#E8F5E9'; // pale green for regular zones
+                                })();
 
                                 return (
                                     <Grid item xs={12} key={zone.name}>

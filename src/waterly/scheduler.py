@@ -10,7 +10,8 @@ from datetime import datetime, time as dtime
 from typing import Optional
 from gpiozero import CPUTemperature
 
-from .config import CONFIG, Settings, UnitType
+from .dfrobot.sen0438 import SEN0438
+from .config import CONFIG, Settings, UnitType, ZONES, ENV_ZONE_NAME
 from .model.measurement import WateringMeasurement, Measurement, convert_measurement
 from .model.water_log import WateringRecord, WateringAssessment
 from .model.units import Unit
@@ -18,7 +19,7 @@ from .patch import Patch
 from .pulses import PulseCounter
 from .queues import receive_scheduler_message, QueueMessage, Action
 from .storage import record_npk, record_rh, record_watering, record_rpi_temperature, TrendName, \
-    record_watering_assessment, record_waterlog
+    record_watering_assessment, record_waterlog, record_env_temperature, record_env_humidity
 from .weather import WeatherService
 
 
@@ -473,6 +474,17 @@ class WateringManager:
                 self._logger.error(f"Sensors readings storage failed for zone {zone}: {e}", exc_info=True)
         rpi_temp = Measurement(CPUTemperature().temperature, Unit.CELSIUS, datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]))
         record_rpi_temperature(rpi_temp if metric else rpi_temp.convert(Unit.FAHRENHEIT))
+        # read env temperature and humidity
+        # Get the Zone object (or None if not found)
+        env_zone = next((z for z in ZONES.values() if z.name == ENV_ZONE_NAME), None)
+        sensor = SEN0438(env_zone.rh_sensor_address)
+        sensor.open()
+        env_temp = Measurement(sensor.read_temperature_c(), Unit.CELSIUS, datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]))
+        record_env_temperature(env_temp if metric else env_temp.convert(Unit.FAHRENHEIT))
+        time.sleep(0.25)
+        env_humid = Measurement(sensor.read_humidity(), Unit.PERCENT, datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]))
+        record_env_humidity(env_humid)
+        sensor.close()
         self._logger.info("Storage of sensor readings finished")
 
     def _perform_watering(self, weather_assessment: WateringAssessment):

@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime, UTC
 from typing import Any
 
-from .config import get_project_root, Settings, CONFIG, RPI_ZONE_NAME, ZONES, AppConfig
+from .config import get_project_root, Settings, CONFIG, RPI_ZONE_NAME, ZONES, AppConfig, ENV_ZONE_NAME
 from .model.measurement import Measurement, WateringMeasurement
 from .model.times import valid_timezone
 from .model.trend import TrendName
@@ -274,6 +274,18 @@ def record_rpi_temperature(value: Measurement):
     Records the Raspberry Pi board temperature under a dedicated zone.
     """
     record_measurement(TrendName.RPI_TEMPERATURE, RPI_ZONE_NAME, value)
+
+def record_env_temperature(value: Measurement):
+    """
+    Records the environment temperature under a dedicated zone.
+    """
+    record_measurement(TrendName.ENV_TEMPERATURE, ENV_ZONE_NAME, value)
+
+def record_env_humidity(value: Measurement):
+    """
+    Records the environment humidity under a dedicated zone.
+    """
+    record_measurement(TrendName.ENV_HUMIDITY, ENV_ZONE_NAME, value)
 
 def record_rh(zone: str, rh: Measurement, temp: Measurement, ph: Measurement, ec: Measurement, sal: Measurement, tds: Measurement):
     metric = CONFIG[Settings.UNITS] == UnitType.METRIC

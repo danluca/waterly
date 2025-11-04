@@ -28,6 +28,8 @@ class TrendName(StrEnum):
     POTASSIUM = "potassium"
     WATER = "water"
     RPI_TEMPERATURE = "rpitemp"
+    ENV_TEMPERATURE = "envtemp"
+    ENV_HUMIDITY = "envhumidity"
 
 
 class Trend:

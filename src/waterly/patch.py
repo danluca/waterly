@@ -396,7 +396,7 @@ def initialize_patches(zones: list[Zone]) -> int:
     if PATCHES:  # already initialized
         return len(PATCHES)
 
-    new_patches = [Patch(z) for z in zones if getattr(z, "rh_sensor_address", None)]
+    new_patches = [Patch(z) for z in zones if getattr(z, "relay_address", None)]
     PATCHES.extend(new_patches)
     size = len(PATCHES)
     return size

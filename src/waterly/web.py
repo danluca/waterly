@@ -97,7 +97,7 @@ def get_latest_sensors():
         cur = conn.cursor()
         # most recent measurements
         rows = cur.execute("select m.name, m.ts_utc, m.tz, m.reading, m.unit, z.name, z.description from v_latest_measurement m, "
-                           "zone z where m.name in ('temperature', 'humidity', 'ph', 'rpitemp', 'water', 'nitrogen', 'phosphorus', 'potassium') "
+                           "zone z where m.name in ('temperature', 'humidity', 'ph', 'rpitemp', 'water', 'nitrogen', 'phosphorus', 'potassium', 'envtemp', 'envhumidity') "
                            "and m.zone_id = z.id").fetchall()
         result = {}
         for name, tutc, tz, reading, unit, zone_name, zone_desc in rows:

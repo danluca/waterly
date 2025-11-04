@@ -50,6 +50,7 @@ LOG_DIR = f"{get_project_root()}/logs"
 # Zones and sensors IDs
 ZONES: dict[int, Zone] = {}
 RPI_ZONE_NAME = "RPI"   # must match core data entry for zone 4
+ENV_ZONE_NAME = "ENV"   # must match core data entry for zone 5
 #</editor-fold>
 
 class Settings(StrEnum):
