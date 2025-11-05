@@ -100,7 +100,10 @@
             "precip_unit": "inch",
             "temp_max": 52.3,
             "temp_min": 34.5,
-            "temp_unit": "\u00b0F"
+            "temp_unit": "\u00b0F",
+            "soil_moisture_min": 10.0,
+            "soil_moisture_max": 20.0,
+            "soil_moisture_unit": "%"
         },
         "prev12": {
             "precip": 0.0,
@@ -108,7 +111,10 @@
             "precip_unit": "inch",
             "temp_max": 56.8,
             "temp_min": 40.7,
-            "temp_unit": "\u00b0F"
+            "temp_unit": "\u00b0F",
+            "soil_moisture_min": 21.0,
+            "soil_moisture_max": 0.21,
+            "soil_moisture_unit": "%"
         },
         "timestamp": {
             "date": "Nov 03, 2025",

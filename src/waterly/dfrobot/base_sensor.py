@@ -236,27 +236,38 @@ class BaseRS485ModbusSensor:
             self._is_present = False
         return None
 
+    # Numeric helpers
+    def _to_int16(self, value: int) -> int:
+        """
+        Convert any integer to a signed 16-bit value using two's complement.
+        Returns a value in range [-32768, 32767].
+        """
+        v = int(value) & 0xFFFF
+        return v - 0x10000 if v >= 0x8000 else v
+
     def _read_one(self, reg_addr: int) -> int:
         """
         Try reading as Input Register first (0x04), then Holding Register (0x03).
-        Returns an unsigned 16-bit integer.
+        Returns a signed 16-bit integer.
         """
         # noinspection PyBroadException
         try:
             # self._logger.debug(f"Reading 1 register at {reg_addr} func {self._pref_data_func}")
             data = self.__read_registers(self._pref_data_func, reg_addr, 1)
-            return int(data[0] & 0xFFFF)
+            # Normalize to signed 16-bit even if backend gives unsigned or out-of-range values
+            return self._to_int16(data[0])
         except Exception:
             other_data_func = self.DATA_FUNCTIONS[1] if self._pref_data_func == self.DATA_FUNCTIONS[0] else self.DATA_FUNCTIONS[0]
             # self._logger.debug(f"Reading 1 register at {reg_addr} func {other_data_func}")
             sleep(0.25)
             data = self.__read_registers(other_data_func, reg_addr, 1)
-            return int(data[0] & 0xFFFF)
+            # Normalize to signed 16-bit in the fallback path as well
+            return self._to_int16(data[0])
 
     def _read_many(self, reg_addrs: list[int]) -> dict[int, int]:
         """
         Efficient batched read when registers are near each other, with
-        fallback to per-register reads. Returns a dict mapping reg -> value.
+        fallback to per-register reads. Returns a dict mapping reg -> signed 16-bit value.
         """
         if not reg_addrs:
             return {}
@@ -271,7 +282,7 @@ class BaseRS485ModbusSensor:
                 # self._logger.debug(f"Reading {span} registers at {first:#X} func {func}")
                 block = self.__read_registers(func, first, span)
                 # self._logger.debug(f"Read {len(block)} registers: {block}")
-                return {addr: int(block[addr - first] & 0xFFFF) for addr in reg_addrs}
+                return {addr: self._to_int16(block[addr - first]) for addr in reg_addrs}
             except Exception:
                 sleep(0.25)
                 # self._logger.debug(f"Failed to read {span} registers at {first} func {func}", exc_info=True)

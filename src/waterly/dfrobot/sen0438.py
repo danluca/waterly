@@ -147,7 +147,7 @@ class SEN0438(BaseRS485ModbusSensor):
 
     def read_all(self) -> dict[ReadingType, float|int]:
         """
-        Returns (temperature_c, moisture_percent, ec_uScm, ph)
+        Returns (Temperature 'C, Humidity %)
         """
         regs = [self.REG_HUMIDITY, self.REG_TEMPERATURE]
         values = self._read_many(regs)

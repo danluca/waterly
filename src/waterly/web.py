@@ -17,7 +17,7 @@ from .patch import PATCHES
 from .queues import send_message_to_scheduler, QueueMessage, Action
 from .model.measurement import convert_measurement_unit_type
 from .model.times import valid_timezone, now_local
-from .model.units import UnitType
+from .model.units import UnitType, Unit
 from .config import get_project_root, CONFIG, Settings
 from .storage import db
 
@@ -131,10 +131,10 @@ def get_latest_sensors():
         # weather info - exclude items without precipitation probability (current conditions)
         now = now_local()
         wrows = cur.execute("select w.forecast_ts_utc, w.tz, w.temperature_2m, w.temperature_unit, w.precipitation, "
-                           "w.precipitation_unit, w.precipitation_probability from v_weather_12h_window w "
+                           "w.precipitation_unit, w.precipitation_probability, w.soil_moisture_1_to_3cm, w.moisture_unit from v_weather_12h_window w "
                             "where w.precipitation_probability is not null").fetchall()
         weather = {"prev12": {}, "next12": {}}
-        for ts, tz, temp, temp_unit, precip, precip_unit, precip_prob in wrows:
+        for ts, tz, temp, temp_unit, precip, precip_unit, precip_prob, soil_moisture, moisture_unit in wrows:
             # find temp min and max for previous 12h and next 12h
             time = datetime.fromtimestamp(ts/1000.0, valid_timezone(tz))
             c_temp, c_temp_unit = convert_measurement_unit_type(temp, temp_unit, CONFIG[Settings.UNITS])
@@ -154,6 +154,13 @@ def get_latest_sensors():
                 if "precip_prob" not in weather["prev12"]:
                     weather["prev12"]["precip_prob"] = precip_prob
                 weather["prev12"]["precip_prob"] = max(precip_prob, weather["prev12"]["precip_prob"])
+                if "soil_moisture_min" not in weather["prev12"]:
+                    weather["prev12"]["soil_moisture_min"] = soil_moisture
+                weather["prev12"]["soil_moisture_min"] = min(soil_moisture, weather["prev12"]["soil_moisture_min"])
+                if "soil_moisture_max" not in weather["prev12"]:
+                    weather["prev12"]["soil_moisture_max"] = soil_moisture
+                weather["prev12"]["soil_moisture_max"] = max(soil_moisture, weather["prev12"]["soil_moisture_max"])
+                weather["prev12"]["soil_moisture_unit"] = moisture_unit
             else:
                 if "temp_min" not in weather["next12"]:
                     weather["next12"]["temp_min"] = c_temp
@@ -169,8 +176,21 @@ def get_latest_sensors():
                 if "precip_prob" not in weather["next12"]:
                     weather["next12"]["precip_prob"] = precip_prob
                 weather["next12"]["precip_prob"] = max(precip_prob, weather["next12"]["precip_prob"])
+                if "soil_moisture_min" not in weather["next12"]:
+                    weather["next12"]["soil_moisture_min"] = soil_moisture
+                weather["next12"]["soil_moisture_min"] = min(soil_moisture, weather["next12"]["soil_moisture_min"])
+                if "soil_moisture_max" not in weather["next12"]:
+                    weather["next12"]["soil_moisture_max"] = soil_moisture
+                weather["next12"]["soil_moisture_max"] = max(soil_moisture, weather["next12"]["soil_moisture_max"])
+                weather["next12"]["soil_moisture_unit"] = moisture_unit
         weather["timestamp"] = {"date": now.strftime("%b %d, %Y"), "time": now.strftime("%H:%M"), "utc": now.timestamp()}
         weather["location"] = CONFIG[Settings.LOCATION]
+        weather["prev12"]["soil_moisture_min"] = 100.0 * weather["prev12"]["soil_moisture_min"]
+        weather["prev12"]["soil_moisture_max"] = 100.0 * weather["prev12"]["soil_moisture_max"]
+        weather["next12"]["soil_moisture_min"] = 100.0 * weather["next12"]["soil_moisture_min"]
+        weather["next12"]["soil_moisture_max"] = 100.0 * weather["next12"]["soil_moisture_max"]
+        weather["prev12"]["soil_moisture_unit"] = Unit.PERCENT
+        weather["next12"]["soil_moisture_unit"] = Unit.PERCENT
         forecast_time = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
         weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
         result["weather"] = weather
