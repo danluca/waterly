@@ -6,12 +6,14 @@
 import threading
 import time
 import logging
+import subprocess
 from datetime import datetime, time as dtime
 from typing import Optional
 from gpiozero import CPUTemperature
 
 from .dfrobot.sen0438 import SEN0438
 from .config import CONFIG, Settings, UnitType, ZONES, ENV_ZONE_NAME
+from .model.about import ABOUT
 from .model.measurement import WateringMeasurement, Measurement, convert_measurement
 from .model.water_log import WateringRecord, WateringAssessment
 from .model.units import Unit
@@ -409,6 +411,19 @@ class WateringManager:
                     pass
                 self._manual_mode.pop(zone_name, None)
         
+    def _handle_about_info(self):
+        info = subprocess.check_output(["/usr/sbin/iwconfig", "wlan0"], text=True)
+        for line in info.splitlines():
+            if "ESSID:" in line:
+                ABOUT.wifi_ssid = line.strip().split("ESSID:")[1].strip().strip('"')
+            if "Link Quality" in line:
+                # Example: "Link Quality=70/70"
+                quality_str = line.split("Link Quality=")[1].split(" ")[0]
+                quality_value = int(quality_str.split("/")[0])
+                quality_max = int(quality_str.split("/")[1])
+                ABOUT.wifi_quality = f"{quality_value} / {quality_max}"
+                # Example: "Signal level=-45 dBm"
+                ABOUT.wifi_rssi = float(line.split("Signal level=")[1].strip().split()[0])
 
     def _run(self):
         """
@@ -430,6 +445,8 @@ class WateringManager:
             self._handle_manual_watering()  # we give priority to manually invoked watering
 
             self._handle_auto_watering()
+
+            self._handle_about_info()
 
             self._stop.wait(15.0)
 

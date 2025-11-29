@@ -8,6 +8,7 @@ import ZonesGrid from './components/ZonesGrid';
 import Footer from './components/Footer';
 import WaterDialog from './components/WaterDialog';
 import SettingsPage from './pages/Settings';
+import AboutPage from './pages/About';
 
 export default function App() {
     // Watering dialog state
@@ -21,7 +22,22 @@ export default function App() {
     const { sensorData, manifest } = useAppData();
     const path = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '/';
     if (path.startsWith('/settings')) {
-        return <SettingsPage/>;
+        return (
+            <Container sx={{marginY: 4}}>
+                <Header sensorData={sensorData} />
+                <SettingsPage/>;
+                <Footer manifest={manifest} />
+            </Container>
+        );
+    }
+    if (path.startsWith('/about')) {
+        return (
+            <Container sx={{marginY: 4}}>
+                <Header sensorData={sensorData} />
+                <AboutPage />
+                <Footer manifest={manifest} />
+            </Container>
+        );
     }
 
     // Handlers for watering dialog
@@ -75,7 +91,7 @@ export default function App() {
 
     return (
         <Container sx={{marginY: 4}}>
-            <Header />
+            <Header sensorData={sensorData} />
             <ZonesGrid sensorData={sensorData} onOpenWaterDialog={(zone) => openWaterDialog(zone)} />
             <Footer manifest={manifest} />
             <WaterDialog

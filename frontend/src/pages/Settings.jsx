@@ -266,41 +266,6 @@ export default function SettingsPage() {
 
   return (
     <Container sx={{my: 4}}>
-      <Box sx={{
-        p: {xs: 2, sm: 3},
-        mb: 3,
-        borderRadius: 2,
-        background: 'linear-gradient(135deg, #6EE7F9 0%, #A78BFA 35%, #F472B6 70%, #F59E0B 100%)',
-        boxShadow: 4,
-        position: 'relative',
-        overflow: 'hidden',
-      }}>
-        <Box sx={{display: 'flex', alignItems: 'center', gap: 1.25}}>
-          <SettingsIcon sx={{color: '#065F46', fontSize: 34}}/>
-          <Typography variant="h4" sx={{
-            fontWeight: 800,
-            letterSpacing: 0.5,
-            color: '#064E3B',
-            textShadow: '0 2px 4px rgba(0,0,0,0.45)',
-            backgroundClip: 'text',
-            WebkitBackgroundClip: 'text',
-            backgroundImage: 'inherit',
-          }}>
-          <Link href="/" underline="hover" sx={{color: '#064E3B'}}>Waterly</Link> - Settings
-          </Typography>
-        </Box>
-        <WavesIcon
-          sx={{
-            position: 'absolute',
-            right: -8,
-            bottom: -10,
-            fontSize: 120,
-            color: 'rgba(255,255,255,0.18)',
-            pointerEvents: 'none',
-            transform: 'rotate(-8deg)',
-          }}
-        />
-      </Box>
       {loading && <Typography>Loading...</Typography>}
       {error && <Alert severity="error" sx={{mb: 2}}>{error}</Alert>}
       {message && <Alert severity="success" sx={{mb: 2}}>{message}</Alert>}

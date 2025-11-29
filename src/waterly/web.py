@@ -8,6 +8,7 @@ import re
 import logging
 import json
 
+from dataclasses import asdict
 from datetime import datetime
 from pytz import timezone
 from flask import Flask, jsonify, request, render_template, send_from_directory, abort, Response
@@ -18,7 +19,8 @@ from .queues import send_message_to_scheduler, QueueMessage, Action
 from .model.measurement import convert_measurement_unit_type
 from .model.times import valid_timezone, now_local
 from .model.units import UnitType, Unit
-from .config import get_project_root, CONFIG, Settings
+from .model.about import ABOUT
+from .config import get_project_root, CONFIG, Settings, RPI_ZONE_NAME
 from .storage import db
 
 HTTP_HOST = "0.0.0.0"
@@ -40,7 +42,7 @@ def home():
     return send_from_directory(directory, filename, mimetype="text/html")
 
 
-@app.get("/about")
+# @app.get("/about.html")
 def about():
     # Renders templates/about.html
     return render_template("about.html", title="About")
@@ -62,6 +64,23 @@ def serve_raw_page(filename: str):
 @app.get("/api/health")
 def health():
     return jsonify({"status": "ok"})
+
+@app.get("/api/about")
+def api_about():
+    info = asdict(ABOUT)
+    now = now_local()
+    tz = CONFIG[Settings.LOCAL_TIMEZONE]
+    tz_name = getattr(tz, "zone", None) or str(tz)
+    # include computed properties not present in asdict
+    try:
+        info["wifi_bars"] = ABOUT.wifi_bars if ABOUT.wifi_rssi is not None else None
+    except Exception:
+        info["wifi_bars"] = None
+    info.update({
+        "now": now.isoformat(),
+        "timezone": tz_name,
+    })
+    return jsonify(info)
 
 @app.get("/api/manifest")
 def manifest():
@@ -194,6 +213,7 @@ def get_latest_sensors():
         forecast_time = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
         weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
         result["weather"] = weather
+        result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars
         return jsonify(result)
 
 @app.post("/api/water/<string:zone_name>/start")
@@ -247,6 +267,7 @@ def api_stop_watering(zone_name: str):
 # Settings page and Config API
 # --------------------------
 @app.get("/settings")
+@app.get("/about")
 @app.get("/settings.html")
 def settings_page():
     directory = app.static_folder

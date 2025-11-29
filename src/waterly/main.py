@@ -2,13 +2,15 @@
 #
 #  Copyright (c) 2025 by Dan Luca. All rights reserved.
 #
-
+import os.path
 import signal
 import sys
 import threading
 import time
 import logging
 import platform
+import subprocess
+import json
 
 from importlib.metadata import version, PackageNotFoundError
 from .config import ZONES
@@ -19,6 +21,7 @@ from .scheduler import WateringManager
 from .weather import WeatherService
 from .log import init_logging
 from .web import create_app, run_app
+from .model.about import ABOUT
 
 def uncaught_global_exception_handler(exc_type, exc_value, exc_traceback):
     logging.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
@@ -33,6 +36,22 @@ def get_app_version() -> str:
     except PackageNotFoundError:
         return "unknown"
 
+def get_system_info():
+    # the network information
+    info = subprocess.check_output(["/usr/sbin/ip", "address", "show", "wlan0"], text=True)
+    for line in info.splitlines():
+        if "inet " in line:
+            ABOUT.ip_address = line.strip().split()[1].split("/")[0]
+            ABOUT.netmask = line.strip().split()[3]
+        if "link/ether" in line:
+            ABOUT.mac_address = line.strip().split()[1].upper()
+    # the manifest data
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../web/static/manifest.json"), "r") as f:
+        manifest = json.load(f)
+        ABOUT.waterly_branch = manifest["git_branch"]
+        ABOUT.waterly_sha = manifest["git_sha"]
+        ABOUT.waterly_build_date = manifest["build_date"]
+        ABOUT.waterly_repo_url = manifest["git_url"]
 
 def main():
     init_logging()
@@ -45,6 +64,11 @@ def main():
     os_version = platform.version()
     logger.info("\n\n====================================================================================================\n")
     logger.info("Starting Waterly application version %s on %s %s %s...", get_app_version(), os_name, os_release, os_version)
+    ABOUT.os_name = os_name
+    ABOUT.os_release = os_release
+    ABOUT.os_version = os_version
+    ABOUT.waterly_version = get_app_version()
+    get_system_info()
 
     # Storage
     init_db()
