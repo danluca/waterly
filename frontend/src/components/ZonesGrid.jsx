@@ -80,15 +80,25 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
                 maxWidth: { md: `calc(${desiredCols} * 230px + ${desiredCols} * 16px)` },
                 mx: { md: 'auto' }
               }}>
-                {metrics.map(m => (
-                  <Box key={`${zone.name}-${m.key}`} sx={{height: '100%'}}>
-                    <SensorCard
-                      value={zone[m.key]}
-                      unit={zone[m.unitKey]}
-                      subtitle={m.label}
-                    />
-                  </Box>
-                ))}
+                {metrics.map(m => {
+                  const prevMin = zone[`${m.key}_prev12_min`];
+                  const prevMax = zone[`${m.key}_prev12_max`];
+                  const showPrev = prevMin !== undefined && prevMax !== undefined;
+                  return (
+                    <Box key={`${zone.name}-${m.key}`} sx={{height: '100%'}}>
+                      <SensorCard
+                        value={zone[m.key]}
+                        unit={zone[m.unitKey]}
+                        subtitle={m.label}
+                        {...(showPrev ? {
+                          secondaryLabel: 'Prev 12h',
+                          secondaryValue: `${fmt(prevMin)} - ${fmt(prevMax)}`,
+                          secondaryUnit: zone[m.unitKey]
+                        } : {})}
+                      />
+                    </Box>
+                  );
+                })}
                 {hasWater && (
                   <Box key={`${zone.name}-water`} sx={{height: '100%'}}>
                     <SensorCard subtitle="Water"

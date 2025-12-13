@@ -137,6 +137,44 @@ def get_latest_sensors():
                 result[zone_name]["water_state"] = patch.water_state
             if name == "water":
                 result[zone_name]["last_watering"] = datetime.fromtimestamp(tutc/1000, valid_timezone(tz)).strftime("%b %d, %Y")
+
+        # previous 12 hours min/max for each non-water sensor, by zone
+        # compute using raw measurements, converting each reading to configured display units
+        now = now_local()
+        try:
+            # UTC epoch milliseconds cutoff for last 12 hours
+            cutoff_utc = (int(now.timestamp()) - 12 * 3600)*1000
+        except Exception:
+            # fallback in case of timezone issues (shouldn't happen)
+            cutoff_utc = 0
+        prev12_rows = cur.execute("select z.name, m.name, m.ts_utc, m.tz, m.reading, m.unit "
+            "from measurement m join zone z on z.id = m.zone_id "
+            "where m.name in ('temperature', 'humidity', 'ph', 'rpitemp', 'nitrogen', 'phosphorus', 'potassium', 'envtemp', 'envhumidity') "
+            "and m.ts_utc >= ?", (cutoff_utc,)).fetchall()
+
+        # accumulate min/max per zone+metric after converting to configured units
+        prev12_stats = {}
+        for zone_name, metric_name, ts_utc, tz, reading, unit in prev12_rows:
+            # Only augment zones present in the latest set (avoid introducing hidden zones unexpectedly)
+            if zone_name not in result:
+                continue
+            c_val, c_unit = convert_measurement_unit_type(reading, unit, CONFIG[Settings.UNITS])
+            key = (zone_name, metric_name)
+            s = prev12_stats.get(key)
+            if s is None:
+                s = {"min": c_val, "max": c_val, "unit": c_unit}
+            else:
+                # unit should be the same since conversion target is fixed by config
+                if c_val is not None:
+                    s["min"] = min(s["min"], c_val)
+                    s["max"] = max(s["max"], c_val)
+            prev12_stats[key] = s
+
+        # attach stats to result payload
+        for (zone_name, metric_name), s in prev12_stats.items():
+            result[zone_name][f"{metric_name}_prev12_min"] = s["min"]
+            result[zone_name][f"{metric_name}_prev12_max"] = s["max"]
+
         # total water consumed per zone
         waters = cur.execute("select sum(m.reading), z.name, m.unit from measurement m, zone z where m.name ='water' "
                              "and z.id=m.zone_id group by m.zone_id, unit").fetchall()
@@ -148,7 +186,6 @@ def get_latest_sensors():
             if "last_watering" not in result[z]:
                 result[z]["last_watering"] = "n/a"
         # weather info - exclude items without precipitation probability (current conditions)
-        now = now_local()
         wrows = cur.execute("select w.forecast_ts_utc, w.tz, w.temperature_2m, w.temperature_unit, w.precipitation, "
                            "w.precipitation_unit, w.precipitation_probability, w.soil_moisture_1_to_3cm, w.moisture_unit from v_weather_12h_window w "
                             "where w.precipitation_probability is not null").fetchall()
