@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) 2025,2026 by Dan Luca. All rights reserved.
 #
 
 import os
@@ -250,7 +250,7 @@ def get_latest_sensors():
         forecast_time = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
         weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
         result["weather"] = weather
-        result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars
+        result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars if ABOUT.wifi_rssi is not None else 0
         return jsonify(result)
 
 @app.post("/api/water/<string:zone_name>/start")

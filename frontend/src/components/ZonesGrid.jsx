@@ -142,36 +142,52 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
                 </Typography>
               );
             })()}
-            <Grid container spacing={2} alignItems="stretch" sx={{mt: 0.5}}>
-              <Grid item sx={{height: '100%'}}>
-                <SensorCard subtitle="TEMP Previous 12h"
-                  value={`${fmt(weather.prev12?.temp_min)} - ${fmt(weather.prev12?.temp_max)}`}
-                  unit={weather.prev12?.temp_unit}
-                />
+            <Grid container spacing={3} sx={{mt: 0.5}}>
+              {/* Previous 12h group */}
+              <Grid item xs={12} sm="auto">
+                <Typography variant="caption" color="text.secondary" sx={{fontWeight: 'bold', display: 'block', mb: 1}}>
+                  Previous 12h
+                </Typography>
+                <Grid container spacing={2} alignItems="stretch">
+                  <Grid item sx={{height: '100%'}}>
+                    <SensorCard subtitle="Temperature"
+                      value={`${fmt(weather.prev12?.temp_min)} - ${fmt(weather.prev12?.temp_max)}`}
+                      unit={weather.prev12?.temp_unit}
+                    />
+                  </Grid>
+                  <Grid item sx={{height: '100%'}}>
+                    <SensorCard subtitle="Moisture"
+                      value={`${fmt(weather.prev12?.soil_moisture_min)} - ${fmt(weather.prev12?.soil_moisture_max)}`}
+                      unit={weather.prev12?.soil_moisture_unit}
+                      secondaryLabel="Rain"
+                      secondaryValue={weather.prev12?.precip}
+                      secondaryUnit={weather.prev12?.precip_unit}
+                    />
+                  </Grid>
+                </Grid>
               </Grid>
-              <Grid item sx={{height: '100%'}}>
-                <SensorCard subtitle="TEMP Next 12h"
-                  value={`${fmt(weather.next12?.temp_min)} - ${fmt(weather.next12?.temp_max)}`}
-                  unit={weather.next12?.temp_unit}
-                />
-              </Grid>
-              <Grid item sx={{height: '100%'}}>
-                <SensorCard subtitle="MOISTURE Previous 12h"
-                  value={`${fmt(weather.prev12?.soil_moisture_min)} - ${fmt(weather.prev12?.soil_moisture_max)}`}
-                  unit={weather.prev12?.soil_moisture_unit}
-                  secondaryLabel="Rain"
-                  secondaryValue={weather.prev12?.precip}
-                  secondaryUnit={weather.prev12?.precip_unit}
-                />
-              </Grid>
-              <Grid item sx={{height: '100%'}}>
-                <SensorCard subtitle="MOISTURE Next 12h"
-                  value={`${fmt(weather.next12?.soil_moisture_min)} - ${fmt(weather.next12?.soil_moisture_max)}`}
-                  unit={weather.next12?.soil_moisture_unit}
-                  secondaryLabel="Rain"
-                  secondaryValue={weather.next12?.precip}
-                  secondaryUnit={`${weather.next12?.precip_unit}${weather.next12?.precip_prob != null ? ` - chance: ${fmt(weather.next12.precip_prob)}%` : ''}`}
-                />
+              {/* Next 12h group */}
+              <Grid item xs={12} sm="auto">
+                <Typography variant="caption" color="text.secondary" sx={{fontWeight: 'bold', display: 'block', mb: 1}}>
+                  Next 12h
+                </Typography>
+                <Grid container spacing={2} alignItems="stretch">
+                  <Grid item sx={{height: '100%'}}>
+                    <SensorCard subtitle="Temperature"
+                      value={`${fmt(weather.next12?.temp_min)} - ${fmt(weather.next12?.temp_max)}`}
+                      unit={weather.next12?.temp_unit}
+                    />
+                  </Grid>
+                  <Grid item sx={{height: '100%'}}>
+                    <SensorCard subtitle="Moisture"
+                      value={`${fmt(weather.next12?.soil_moisture_min)} - ${fmt(weather.next12?.soil_moisture_max)}`}
+                      unit={weather.next12?.soil_moisture_unit}
+                      secondaryLabel="Rain"
+                      secondaryValue={weather.next12?.precip}
+                      secondaryUnit={`${weather.next12?.precip_unit}${weather.next12?.precip_prob != null ? ` - chance: ${fmt(weather.next12.precip_prob)}%` : ''}`}
+                    />
+                  </Grid>
+                </Grid>
               </Grid>
             </Grid>
           </Card>
