@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) 2025,2026 by Dan Luca. All rights reserved.
 #
 
 import threading
@@ -227,7 +227,8 @@ class WeatherService:
                             CONFIG[Settings.LOCAL_TIMEZONE] = self._timezone
             except Exception as e:
                 self._logger.error(f"Weather update failed: {e}", exc_info=True)
-                wait_time = CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS]
+                # wait_time = CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS]
+                wait_time = 3600    # try again in an hour
             self._stop.wait(wait_time)
 
     def _update_weather(self) -> bool:

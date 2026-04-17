@@ -149,19 +149,21 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
                   Previous 12h
                 </Typography>
                 <Grid container spacing={2} alignItems="stretch">
-                  <Grid item sx={{height: '100%'}}>
+                  <Grid item sx={{height: '100%', backgroundColor: '#F1F2F3'}}>
                     <SensorCard subtitle="Temperature"
                       value={`${fmt(weather.prev12?.temp_min)} - ${fmt(weather.prev12?.temp_max)}`}
                       unit={weather.prev12?.temp_unit}
+                      bgColor={'#F1F2F3'}
                     />
                   </Grid>
-                  <Grid item sx={{height: '100%'}}>
+                  <Grid item sx={{height: '100%', backgroundColor: '#F1F2F3'}}>
                     <SensorCard subtitle="Moisture"
                       value={`${fmt(weather.prev12?.soil_moisture_min)} - ${fmt(weather.prev12?.soil_moisture_max)}`}
                       unit={weather.prev12?.soil_moisture_unit}
                       secondaryLabel="Rain"
                       secondaryValue={weather.prev12?.precip}
                       secondaryUnit={weather.prev12?.precip_unit}
+                      bgColor={'#F1F2F3'}
                     />
                   </Grid>
                 </Grid>
