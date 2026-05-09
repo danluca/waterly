@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025,2026 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 import threading
@@ -20,6 +20,7 @@ from .storage import record_weather, get_weather_data
 from .json.serialization import write_text_file
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
+WEATHER_RETRY_INTERVAL_SECONDS = 15 * 60  # retry interval after transient API errors (e.g. 502)
 
 
 class WeatherService:
@@ -191,7 +192,8 @@ class WeatherService:
 
                 # Determine wait time and whether to perform an update based on window
                 pre_m, pre_s = divmod(self._pre_watering_update_offset, 60)
-                weather_check_done:bool = False
+                # None = not attempted, True = success, False = attempted but failed
+                weather_update_result: Optional[bool] = None
                 if now < window_start:
                     # BEFORE pre-watering window: run at regular interval, but don't overshoot the window start
                     wait_time = min(CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS], max(5, int((window_start - now).total_seconds())))
@@ -205,13 +207,13 @@ class WeatherService:
                             f"waiting time is {wait_m:d}:{wait_s:02d} min. Note the pre-watering window is {pre_m:d}:{pre_s:02d} min.")
                         # fall-through to sleep
                     else:
-                        weather_check_done = self._update_weather()
+                        weather_update_result = self._update_weather()
                 elif window_start <= now < watering_time:
                     # INSIDE pre-watering window: allow only a single update in this window
                     last_update_in_window = self._last_update and (self._last_update >= window_start)
                     if not last_update_in_window:
                         self._logger.info(f"Entering pre-watering window of {pre_m:02d}:{pre_s:02d} min; performing a single weather update.")
-                        weather_check_done = self._update_weather()
+                        weather_update_result = self._update_weather()
                     else:
                         self._logger.info(f"Pre-watering window of {pre_m:02d}:{pre_s:02d} min already updated weather at {self._last_update.strftime('%H:%M:%S')}; skipping additional updates.")
                     # Sleep until watering time to avoid repeated updates in the window
@@ -220,11 +222,16 @@ class WeatherService:
                     # Shouldn't happen because watering_time is always in the future, but be safe.
                     wait_time = CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS]
 
-                if weather_check_done:
+                if weather_update_result is True:
                     with self._lock:
                         if (CONFIG[Settings.LOCAL_TIMEZONE] is None) or (CONFIG[Settings.LOCAL_TIMEZONE] != self._timezone):
                             self._logger.info(f"Local timezone changed from {CONFIG[Settings.LOCAL_TIMEZONE]} to {self._timezone}")
                             CONFIG[Settings.LOCAL_TIMEZONE] = self._timezone
+                elif weather_update_result is False:
+                    # API call failed (e.g. 502 Bad Gateway) - retry sooner instead of waiting the full interval
+                    retry_m, retry_s = divmod(WEATHER_RETRY_INTERVAL_SECONDS, 60)
+                    self._logger.info(f"Weather update failed - scheduling retry in {retry_m}:{retry_s:02d} min instead of nominal interval.")
+                    wait_time = WEATHER_RETRY_INTERVAL_SECONDS
             except Exception as e:
                 self._logger.error(f"Weather update failed: {e}", exc_info=True)
                 # wait_time = CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS]
