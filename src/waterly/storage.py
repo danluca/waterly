@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 # python
 import glob
@@ -121,7 +121,14 @@ def init_db():
         pass
 
     ddl_files = sorted(glob.glob(f"{get_project_root()}/waterly/db/*.sql"), key=lambda x: x.split("_")[-1])
-    latest_version = re.search(r"_v([\d+.]+)\.", ddl_files[-1], re.RegexFlag.IGNORECASE).group(1)
+    if not ddl_files:
+        logger.error("No DDL migration files found in waterly/db/ - database cannot be initialized")
+        return
+    version_match = re.search(r"_v([\d+.]+)\.", ddl_files[-1], re.RegexFlag.IGNORECASE)
+    if not version_match:
+        logger.error(f"Could not extract version from migration file '{ddl_files[-1]}' - database cannot be initialized")
+        return
+    latest_version = version_match.group(1)
     with db() as conn:
         cur = conn.cursor()
         if __is_db_initialized(conn):
@@ -289,13 +296,21 @@ def record_env_humidity(value: Measurement):
 
 def record_rh(zone: str, rh: Measurement, temp: Measurement, ph: Measurement, ec: Measurement, sal: Measurement, tds: Measurement):
     metric = CONFIG[Settings.UNITS] == UnitType.METRIC
-    # write all in a short autocommit burst
-    record_measurement(TrendName.HUMIDITY, zone, rh)
-    record_measurement(TrendName.TEMPERATURE, zone, temp, Unit.CELSIUS if metric else Unit.FAHRENHEIT)
-    record_measurement(TrendName.PH, zone, ph)
-    record_measurement(TrendName.ELECTRICAL_CONDUCTIVITY, zone, ec)
-    record_measurement(TrendName.SALINITY, zone, sal)
-    record_measurement(TrendName.TOTAL_DISSOLVED_SOLIDS, zone, tds)
+    temp_unit = Unit.CELSIUS if metric else Unit.FAHRENHEIT
+    c_temp = temp if temp.unit == temp_unit else temp.convert(temp_unit)
+    with db() as conn:
+        zone_id = conn.execute("SELECT id FROM zone WHERE name=?", (zone,)).fetchone()[0]
+        for trend, m in (
+            (TrendName.HUMIDITY, rh),
+            (TrendName.TEMPERATURE, c_temp),
+            (TrendName.PH, ph),
+            (TrendName.ELECTRICAL_CONDUCTIVITY, ec),
+            (TrendName.SALINITY, sal),
+            (TrendName.TOTAL_DISSOLVED_SOLIDS, tds),
+        ):
+            conn.execute("INSERT OR REPLACE INTO measurement(name, zone_id, ts_utc, tz, reading, unit) VALUES (?,?,?,?,?,?)",
+                (trend, zone_id, int(m.timestamp.timestamp() * 1000), str(m.timestamp.tzinfo), m.value, m.unit))
+        conn.commit()
 
 def record_npk(zone: str, n: Measurement, p: Measurement, k: Measurement):
     record_measurement(TrendName.NITROGEN, zone, n)

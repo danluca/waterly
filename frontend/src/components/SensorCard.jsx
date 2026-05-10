@@ -18,9 +18,6 @@ export default function SensorCard({title, value, unit, subtitle, secondaryLabel
                     <Typography variant="overline" color="text.secondary">
                         {subtitle || title}
                     </Typography>
-                    <Typography variant="h6" sx={{mt: 0.5}}>
-                        {title}
-                    </Typography>
                     <Typography variant="h4" sx={{mt: 1}}>
                         {fmt(value)} <Typography component="span" variant="h6" color="text.secondary">{unit}</Typography>
                     </Typography>

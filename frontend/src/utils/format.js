@@ -5,4 +5,4 @@
  *
  */
 
-export const fmt = (v) => (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : v);
+export const fmt = (v, decimals = 2) => (typeof v === 'number' ? v.toLocaleString(undefined, { maximumFractionDigits: decimals }) : v);

@@ -24,6 +24,32 @@ from .storage import record_npk, record_rh, record_watering, record_rpi_temperat
     record_watering_assessment, record_waterlog, record_env_temperature, record_env_humidity
 from .weather import WeatherService
 
+_logger = logging.getLogger(__name__)
+
+
+def _parse_month_day(md: str) -> tuple[int, int] | None:
+    try:
+        m_str, d_str = md.split("-", 1)
+        m, d = int(m_str), int(d_str)
+        if not (1 <= m <= 12 and 1 <= d <= 31):
+            raise ValueError("month/day out of range")
+        return m, d
+    except Exception as e:
+        _logger.error(f"Invalid gardening season day format '{md}', expected 'MM-DD': {e}")
+        return None
+
+
+def is_in_gardening_season(dt: datetime) -> bool:
+    """Returns True if dt falls within the configured gardening season (inclusive). Handles year-wrap."""
+    t = (dt.month, dt.day)
+    start_md = _parse_month_day(CONFIG[Settings.GARDENING_SEASON].get("start") or Settings.GARDENING_SEASON.default.get("start"))
+    end_md = _parse_month_day(CONFIG[Settings.GARDENING_SEASON].get("stop") or Settings.GARDENING_SEASON.default.get("stop"))
+    if start_md is None or end_md is None:
+        return True
+    if start_md <= end_md:
+        return start_md <= t <= end_md
+    return t >= start_md or t <= end_md
+
 
 class WateringManager:
     """
@@ -88,34 +114,8 @@ class WateringManager:
         for patch in self.patches:
             patch.stop_watering()
 
-    def _parse_month_day(self, md: str) -> tuple[int, int]|None:
-        """
-        Parse a MM-DD string into (month, day). Falls back to defaults with logging if invalid.
-        """
-        try:
-            m_str, d_str = md.split("-", 1)
-            m, d = int(m_str), int(d_str)
-            if not (1 <= m <= 12 and 1 <= d <= 31):
-                raise ValueError("month/day out of range")
-            return m, d
-        except Exception as e:
-            self._logger.error(f"Invalid gardening season day format '{md}', expected 'MM-DD': {e}")
-            return None
-
     def _is_in_gardening_season(self, dt: datetime) -> bool:
-        """
-        Returns True if the given datetime falls within the configured gardening season (inclusive).
-        Handles seasons that may wrap across the new year.
-        """
-        t = (dt.month, dt.day)
-        start_md = self._parse_month_day(CONFIG[Settings.GARDENING_SEASON].get("start") or Settings.GARDENING_SEASON.default.get("start"))
-        end_md = self._parse_month_day(CONFIG[Settings.GARDENING_SEASON].get("stop") or Settings.GARDENING_SEASON.default.get("stop"))
-        if start_md <= end_md:
-            # Non-wrapping season (e.g., 03-31 .. 10-31)
-            return start_md <= t <= end_md
-        else:
-            # Wrapping season (e.g., 11-01 .. 03-31)
-            return t >= start_md or t <= end_md
+        return is_in_gardening_season(dt)
 
     def _handle_thread_messages(self):
         """
@@ -256,7 +256,7 @@ class WateringManager:
         if self._last_watering_date != today_key:
             if now.time() >= self._start_time:
                 if not self._is_in_gardening_season(now):
-                    msg = f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON].get('start')} to {CONFIG[Settings.GARDENING_SEASON].get('end')}"
+                    msg = f"NOT in gardening season {CONFIG[Settings.GARDENING_SEASON].get('start')} to {CONFIG[Settings.GARDENING_SEASON].get('stop')}"
                     self._logger.warning(f"Skipping watering - current time {now.isoformat()} is {msg}")
                     self._last_watering_date = today_key
                     CONFIG[Settings.LAST_WATERING_DATE] = today_key
@@ -307,7 +307,7 @@ class WateringManager:
                 patch = next((p for p in self.patches if p.zone.name == zone_name), None)
                 if patch is None:
                     self._logger.warning(f"Manual watering requested for unknown zone '{zone_name}', discarding")
-                    del self._manual_mode[zone_name]
+                    self._manual_mode.pop(zone_name, None)
                     continue
 
                 # Initialize defaults
@@ -392,7 +392,7 @@ class WateringManager:
                         m, s = divmod(duration, 60)
                         self._logger.info(f"Manual watering finished for zone {zone_name} at {humid_stop.value:.2f}% RH after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit} of water")
                         # Cleanup
-                        del self._manual_mode[zone_name]
+                        self._manual_mode.pop(zone_name, None)
                         continue
 
                 # Keep entry if running and not done
@@ -412,18 +412,21 @@ class WateringManager:
                 self._manual_mode.pop(zone_name, None)
         
     def _handle_about_info(self):
-        info = subprocess.check_output(["/usr/sbin/iwconfig", "wlan0"], text=True)
-        for line in info.splitlines():
-            if "ESSID:" in line:
-                ABOUT.wifi_ssid = line.strip().split("ESSID:")[1].strip().strip('"')
-            if "Link Quality" in line:
-                # Example: "Link Quality=70/70"
-                quality_str = line.split("Link Quality=")[1].split(" ")[0]
-                quality_value = int(quality_str.split("/")[0])
-                quality_max = int(quality_str.split("/")[1])
-                ABOUT.wifi_quality = f"{quality_value} / {quality_max}"
-                # Example: "Signal level=-45 dBm"
-                ABOUT.wifi_rssi = float(line.split("Signal level=")[1].strip().split()[0])
+        try:
+            info = subprocess.check_output(["/usr/sbin/iwconfig", "wlan0"], text=True)
+            for line in info.splitlines():
+                if "ESSID:" in line:
+                    ABOUT.wifi_ssid = line.strip().split("ESSID:")[1].strip().strip('"')
+                if "Link Quality" in line:
+                    # Example: "Link Quality=70/70"
+                    quality_str = line.split("Link Quality=")[1].split(" ")[0]
+                    quality_value = int(quality_str.split("/")[0])
+                    quality_max = int(quality_str.split("/")[1])
+                    ABOUT.wifi_quality = f"{quality_value} / {quality_max}"
+                    # Example: "Signal level=-45 dBm"
+                    ABOUT.wifi_rssi = float(line.split("Signal level=")[1].strip().split()[0])
+        except Exception as e:
+            self._logger.debug(f"Unable to read wifi info: {e}")
 
     def _run(self):
         """
@@ -465,16 +468,20 @@ class WateringManager:
         self._logger.info("Polling sensors for all zones")
         metric: bool = CONFIG[Settings.UNITS] == UnitType.METRIC
         all_readings: dict[Patch, dict[TrendName, Measurement]] = {}
-        for patch in self.patches:
-            try:
-                patch.open_sensor_bus()
+        try:
+            for patch in self.patches:
+                try:
+                    patch.open_sensor_bus()
+                    time.sleep(0.25)
+                    self._logger.info(f"Polling sensors for zone {patch.zone.name}...")
+                    all_readings[patch] = patch.measurements()  # dictionary of temp, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium
+                except Exception as e:
+                    self._logger.error(f"Sensors reading failed for zone {patch.zone.name}: {e}", exc_info=True)
                 time.sleep(0.25)
-                self._logger.info(f"Polling sensors for zone {patch.zone.name}...")
-                all_readings[patch] = patch.measurements()  # dictionary of temp, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium
-            except Exception as e:
-                self._logger.error(f"Sensors reading failed for zone {patch.zone.name}: {e}", exc_info=True)
-            time.sleep(0.25)
-        self.patches[0].close_sensor_bus()      # leverages the first patch to close the bus, sensors are all on same bus
+        finally:
+            # All garden sensors share the same RS-485 bus; closing via the first patch closes it for all.
+            if self.patches:
+                self.patches[0].close_sensor_bus()
         self._logger.info("Polling sensors for all zones complete. Storing readings")
 
         for patch, readings in all_readings.items():
@@ -548,8 +555,12 @@ class WateringManager:
                 humid_start = patch.humidity()
                 self._logger.info(f"Watering zone {patch.zone.name} started at humidity level {humid_start.value:.2f}%")
                 while not zone_done and (int(time.time()) - start_ts) < (self._max_minutes * 60):
-                    # Wait a bit and measure water
-                    time.sleep(10)
+                    # Use stop event so a shutdown interrupts the wait immediately
+                    self._stop.wait(10.0)
+                    if self._stop.is_set():
+                        return
+                    # Drain the message queue so STOP_WATERING requests aren't silently dropped
+                    self._handle_thread_messages()
                     # Check humidity threshold
                     if not patch.check_needs_watering():
                         zone_done = True
@@ -572,7 +583,9 @@ class WateringManager:
                                   f"{msmt.unit} of water and ended at humidity level {humid_stop.value:.2f}%")
                 record_waterlog(WateringRecord(patch.zone, True, msmt), weather_assessment)
                 # Wait a bit before starting the next zone; allows the water valves to close properly before starting the next one
-                time.sleep(10)
+                self._stop.wait(10.0)
+                if self._stop.is_set():
+                    return
         finally:
             for patch in self.patches:
                 patch.stop_watering()

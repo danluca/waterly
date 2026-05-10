@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"D:\\\\Projects\\\\Arduino\\\\repos\\\\GardenPy\\\\src\\\\waterly\" -Recurse -Filter \"*.py\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(Sort-Object)",
+      "Bash(Get-ChildItem -Recurse -File \"D:\\\\Projects\\\\Arduino\\\\repos\\\\GardenPy\\\\frontend\\\\src\")",
+      "Bash(Select-Object FullName)",
+      "PowerShell(ls -Recurse \"D:\\\\Projects\\\\Arduino\\\\repos\\\\GardenPy\\\\frontend\\\\src\" -File | % {$_.FullName})",
+      "PowerShell(ls -Recurse \"D:\\\\Projects\\\\Arduino\\\\repos\\\\GardenPy\\\\src\\\\web\\\\static\" -File | % {$_.FullName})",
+      "PowerShell(ls *)",
+      "PowerShell(Get-Item *)"
+    ]
+  }
+}

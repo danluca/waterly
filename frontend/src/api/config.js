@@ -28,22 +28,17 @@ function massage(obj) {
 }
 
 export async function getConfig() {
-  let res, data;
   try {
-    res = await fetch('/api/config', {headers: {'Accept': 'application/json'}});
-    data = await res.json();
+    const res = await fetch('/api/config', {headers: {'Accept': 'application/json'}});
+    let data;
+    try { data = await res.json(); } catch (_) { data = null; }
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (_) {}
+    }
+    return {ok: res.ok, data: massage(data)};
   } catch (e) {
-    // In dev, CRA serves public/api/config at the same path; try again as plain fetch
-    const fallback = await fetch('/api/config');
-    data = await fallback.json();
-    res = fallback;
+    return {ok: false, data: null};
   }
-  if (typeof data === 'string') {
-    try { data = JSON.parse(data); } catch (_) {}
-  }
-
-  const massaged = massage(data);
-  return {ok: res.ok, data: massaged};
 }
 
 export async function postConfig(payload) {

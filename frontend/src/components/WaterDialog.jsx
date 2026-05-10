@@ -30,7 +30,7 @@ export default function WaterDialog({
       <DialogContent>
         <Stack spacing={1.25} sx={{mt: 0.5}}>
           <FormControlLabel control={<Checkbox checked={limitEnabled} onChange={(e)=>setLimitEnabled(e.target.checked)} />} label="Enable time limit" />
-          <TextField type="number" label="Minutes" size="small" value={minutes} onChange={(e)=>setMinutes(e.target.value)} disabled={!limitEnabled} inputProps={{min:1}} />
+          <TextField type="number" label="Minutes" size="small" value={minutes} onChange={(e)=>setMinutes(e.target.value)} disabled={!limitEnabled} slotProps={{htmlInput: {min: 1}}} />
           {errorMsg && (
             <Typography variant="body2" color="error" sx={{mt:0.5}}>{errorMsg}</Typography>
           )}

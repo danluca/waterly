@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 import logging
@@ -15,21 +15,6 @@ from .model.units import Unit
 from .model.trend import TrendName
 from .dfrobot import SEN0604, SEN0605
 from .config import CONFIG, Settings
-
-def convert_celsius_fahrenheit(celsius: float) -> float:
-    """
-    Converts a temperature value from Celsius to Fahrenheit.
-
-    This function takes a temperature in degrees Celsius and converts it to
-    its equivalent in degrees Fahrenheit using the formula
-    Fahrenheit = Celsius * (9/5) + 32.
-
-    :param celsius: Temperature value in degrees Celsius to be converted.
-    :type celsius: float
-    :return: The temperature value converted to degrees Fahrenheit.
-    :rtype: float
-    """
-    return celsius * 9/5 + 32
 
 class Patch:
     """
@@ -354,6 +339,8 @@ class Patch:
         :return: True if watering is needed; False otherwise
         :rtype: bool
         """
+        if self._last_humidity_reading is None:
+            return False
         needs_watering: bool = self._last_humidity_reading.value < self.target_humidity
         if needs_watering:
             self._logger.debug(f"Watering needed in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.target_humidity:.2f}%")
@@ -379,6 +366,8 @@ class Patch:
 
         :return: Whether a drought condition exists (True/False)
         """
+        if self._last_humidity_reading is None:
+            return False
         drought: bool = self._last_humidity_reading.value < self.min_sensor_humidity
         if drought:
             self._logger.warning(f"Drought detected in zone {self.zone.name} - last humidity {self._last_humidity_reading.value:.2f}% < {self.min_sensor_humidity:.2f}%")

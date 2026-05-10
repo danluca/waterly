@@ -1,9 +1,12 @@
-import axios from 'axios';
-
-const BASE_URL = '/api';
+/*
+ * MIT License
+ *
+ * Copyright (c) 2025 by Dan Luca. All rights reserved.
+ *
+ */
 
 export async function fetchSensors() {
-  // returns: [{name, times, values, latestValue, group}]
-  const response = await axios.get(`${BASE_URL}/latest/sensors`);
-  return response.data;
+  const response = await fetch('/api/latest/sensors');
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
 }

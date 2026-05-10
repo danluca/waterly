@@ -60,10 +60,12 @@ export default function AboutPage() {
           )}
 
           <Box sx={{mt: 3}}>
-            <Typography variant="overline" display="block">Raw</Typography>
-            <pre style={{background: '#222', color: '#ddd', padding: '12px', borderRadius: 8, overflowX: 'auto'}}>
-{about ? JSON.stringify(about, null, 2) : ''}
-            </pre>
+            <details>
+              <summary style={{cursor: 'pointer', color: '#666', fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.08em'}}>Raw</summary>
+              <pre style={{background: '#222', color: '#ddd', padding: '12px', borderRadius: 8, overflowX: 'auto', marginTop: 8}}>
+{JSON.stringify(about, null, 2)}
+              </pre>
+            </details>
           </Box>
         </Box>
       )}

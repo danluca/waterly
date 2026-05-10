@@ -224,7 +224,7 @@ class WeatherService:
 
                 if weather_update_result is True:
                     with self._lock:
-                        if (CONFIG[Settings.LOCAL_TIMEZONE] is None) or (CONFIG[Settings.LOCAL_TIMEZONE] != self._timezone):
+                        if CONFIG[Settings.LOCAL_TIMEZONE] is None or getattr(CONFIG[Settings.LOCAL_TIMEZONE], 'zone', None) != getattr(self._timezone, 'zone', None):
                             self._logger.info(f"Local timezone changed from {CONFIG[Settings.LOCAL_TIMEZONE]} to {self._timezone}")
                             CONFIG[Settings.LOCAL_TIMEZONE] = self._timezone
                 elif weather_update_result is False:
@@ -234,8 +234,7 @@ class WeatherService:
                     wait_time = WEATHER_RETRY_INTERVAL_SECONDS
             except Exception as e:
                 self._logger.error(f"Weather update failed: {e}", exc_info=True)
-                # wait_time = CONFIG[Settings.WEATHER_CHECK_INTERVAL_SECONDS]
-                wait_time = 3600    # try again in an hour
+                wait_time = WEATHER_RETRY_INTERVAL_SECONDS
             self._stop.wait(wait_time)
 
     def _update_weather(self) -> bool:

@@ -10,6 +10,23 @@ import {Box, Card, Grid, Typography} from '@mui/material';
 import SensorCard from './SensorCard';
 import { fmt } from '../utils/format';
 
+const ZONE_STYLE = {
+  RPI: { bg: '#FCE4EC', cols: 1 },
+  ENV: { bg: '#E0F7FA', cols: 2 },
+};
+
+const METRIC_DEFS = [
+  {key: 'temperature',  label: 'Temperature', unitKey: 'temperature_unit'},
+  {key: 'humidity',     label: 'Humidity',    unitKey: 'humidity_unit'},
+  {key: 'ph',           label: 'pH',          unitKey: 'ph_unit'},
+  {key: 'nitrogen',     label: 'N',           unitKey: 'nitrogen_unit'},
+  {key: 'phosphorus',   label: 'P',           unitKey: 'phosphorus_unit'},
+  {key: 'potassium',    label: 'K',           unitKey: 'potassium_unit'},
+  {key: 'rpitemp',      label: 'Temperature', unitKey: 'rpitemp_unit'},
+  {key: 'envtemp',      label: 'Temperature', unitKey: 'envtemp_unit'},
+  {key: 'envhumidity',  label: 'Humidity',    unitKey: 'envhumidity_unit'},
+];
+
 export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
   const weather = sensorData?.weather;
   const zones = Object.values(sensorData || {}).filter(z => z && z.name);
@@ -30,33 +47,11 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
   return (
     <Grid container spacing={2}>
       {zones.map((zone) => {
-        const metricDefs = [
-          {key: 'temperature', label: 'Temperature', unitKey: 'temperature_unit'},
-          {key: 'humidity', label: 'Humidity', unitKey: 'humidity_unit'},
-          {key: 'ph', label: 'pH', unitKey: 'ph_unit'},
-          {key: 'nitrogen', label: 'N', unitKey: 'nitrogen_unit'},
-          {key: 'phosphorus', label: 'P', unitKey: 'phosphorus_unit'},
-          {key: 'potassium', label: 'K', unitKey: 'potassium_unit'},
-          {key: 'rpitemp', label: 'Temperature', unitKey: 'rpitemp_unit'},
-          {key: 'envtemp', label: 'Temperature', unitKey: 'envtemp_unit'},
-          {key: 'envhumidity', label: 'Humidity', unitKey: 'envhumidity_unit'},
-        ];
-        const metrics = metricDefs.filter(m => zone[m.key] !== undefined);
+        const metrics = METRIC_DEFS.filter(m => zone[m.key] !== undefined);
         const hasWater = zone.water !== undefined || zone.total_water !== undefined;
 
-        const zoneBg = (() => {
-          const n = String(zone?.name || '').toUpperCase();
-          if (n === 'RPI') return '#FCE4EC';
-          if (n === 'ENV') return '#E0F7FA';
-          return '#E8F5E9';
-        })();
-
-        const desiredCols = (() => {
-          const n = String(zone?.name || '').toUpperCase();
-          if (n === 'RPI') return 1;
-          if (n === 'ENV') return 2;
-          return 4;
-        })();
+        const n = String(zone?.name || '').toUpperCase();
+        const { bg: zoneBg = '#E8F5E9', cols: desiredCols = 4 } = ZONE_STYLE[n] || {};
         const smCols = Math.min(2, desiredCols);
 
         return (
@@ -186,7 +181,7 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
                       unit={weather.next12?.soil_moisture_unit}
                       secondaryLabel="Rain"
                       secondaryValue={weather.next12?.precip}
-                      secondaryUnit={`${weather.next12?.precip_unit}${weather.next12?.precip_prob != null ? ` - chance: ${fmt(weather.next12.precip_prob)}%` : ''}`}
+                      secondaryUnit={`${weather.next12?.precip_unit}${weather.next12?.precip_prob != null ? ` - chance: ${fmt(weather.next12.precip_prob, 0)}%` : ''}`}
                     />
                   </Grid>
                 </Grid>

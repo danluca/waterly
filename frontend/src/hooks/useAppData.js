@@ -22,10 +22,12 @@ export default function useAppData() {
   }, []);
 
   useEffect(() => {
-    const minutes17 = 17 * 60 * 1000;
+    // Poll at 17 min: faster than the 10-min sensor read interval so fresh data lands quickly,
+    // but slow enough to avoid hammering the Pi between reads.
+    const SENSOR_POLL_INTERVAL_MS = 17 * 60 * 1000;
     const id = setInterval(() => {
       fetchSensors().then(setSensorData).catch(() => {});
-    }, minutes17);
+    }, SENSOR_POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
 

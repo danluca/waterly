@@ -7,13 +7,13 @@
 
 import * as React from 'react';
 import {useEffect, useMemo, useState} from 'react';
-import {Container, Box, Typography, Grid, Card, CardContent, TextField, Button, Alert, Divider, Link, Select, MenuItem} from '@mui/material';
+import {Container, Box, Typography, Grid, Card, CardContent, TextField, Button, Alert, Divider, Link, MenuItem} from '@mui/material';
 import {getConfig, postConfig} from '../api/config';
 import SettingsIcon from '@mui/icons-material/Settings';
 import WavesIcon from '@mui/icons-material/Waves';
 
 function isReadOnlyKey(key) {
-  return /last_|_last|_last_/i.test(key);
+  return /last/i.test(key);
 }
 
 const friendlyLabels = {
@@ -135,13 +135,9 @@ export default function SettingsPage() {
         }
         // Only include the object if there are any changed sub-keys
         if (Object.keys(sub).length > 0) {
-          // Special rule: for HUMIDITY_TARGET_PERCENT, if any zone changes,
-          // include the entire map (all zones) to keep triplets consistent.
-          if (key === 'HUMIDITY_TARGET_PERCENT') {
-            changes[key] = newVal;
-          } else {
-            changes[key] = sub;
-          }
+          // Per-zone maps must be sent in full so the backend doesn't lose unchanged zones.
+          const FULL_MAP_KEYS = new Set(['HUMIDITY_TARGET_PERCENT', 'MINIMUM_SENSOR_HUMIDITY_PERCENT']);
+          changes[key] = FULL_MAP_KEYS.has(key) ? newVal : sub;
         }
       } else {
         // Primitive or differing types: include when changed
@@ -356,7 +352,7 @@ export default function SettingsPage() {
               <Grid container spacing={2}>
                 {renderPrimitiveField('LAST_WATERING_DATE', edited.LAST_WATERING_DATE)}
                 {edited.WEATHER_LAST_CHECK_TIMESTAMP && (
-                  <Grid item xs={12} sm={12} md={12} size={4} key={'WEATHER_LAST_CHECK_TIMESTAMP'}>
+                  <Grid item xs={12} key={'WEATHER_LAST_CHECK_TIMESTAMP'}>
                     <TextField
                       fullWidth
                       label={friendlyLabels['WEATHER_LAST_CHECK_TIMESTAMP'] || 'WEATHER_LAST_CHECK_TIMESTAMP'}

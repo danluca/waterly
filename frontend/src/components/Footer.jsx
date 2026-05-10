@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react';
-import {Box, Typography} from '@mui/material';
+import {Box, Link, Typography} from '@mui/material';
 
 export default function Footer({ manifest }) {
   const currentYear = new Date().getFullYear();
@@ -19,16 +19,16 @@ export default function Footer({ manifest }) {
       borderColor: 'divider',
       color: 'text.secondary',
     }}>
-      <Typography variant="body2 ">
+      <Typography variant="body2">
         © {currentYear}{' '}
         {manifest?.author} All rights reserved.
         {manifest?.license ? ` • ${manifest.license} License` : ''}
-        {' • '} <a href={`${manifest?.git_url}`} target="_blank" rel="noopener noreferrer" style={{marginLeft: '0.2rem'}}>
+        {' • '}<Link href={manifest?.git_url} target="_blank" rel="noopener noreferrer" sx={{mx: 0.5}}>
           {`${manifest?.name} v${manifest?.version}`}
-        </a> - {manifest?.description}
-        {' • '} <a href={`${manifest?.git_url}/tree/${manifest?.git_sha}`} target="_blank" rel="noopener noreferrer" style={{marginLeft: '0.2rem'}}>
+        </Link>- {manifest?.description}
+        {' • '}<Link href={`${manifest?.git_url}/tree/${manifest?.git_sha}`} target="_blank" rel="noopener noreferrer" sx={{mx: 0.5}}>
           {`${manifest?.git_branch} @ ${manifest?.git_sha ? manifest.git_sha.slice(0, 8) : ''}`}
-        </a>
+        </Link>
       </Typography>
     </Box>
   );
