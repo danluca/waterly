@@ -1,7 +1,7 @@
 
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 import os
@@ -79,7 +79,7 @@ class Settings(StrEnum):
     TREND_MAX_SAMPLES = "trend_max_samples", 3000                                  # ~ 1 month worth of samples
     LOCAL_TIMEZONE = "local_timezone", DEFAULT_TIMEZONE.zone
     LOCATION = "location", {"longitude":DEFAULT_LONGITUDE, "latitude":DEFAULT_LATITUDE}
-    GARDENING_SEASON = "gardening_season", {"start": "03-31", "stop": "10-31"}  # MM-DD (inclusive)
+    GARDENING_SEASON = "gardening_season", {"start": "05-01", "stop": "10-31"}  # MM-DD (inclusive)
 
     def __new__(cls, value: str, default: dict = None):
         obj = str.__new__(cls, value)

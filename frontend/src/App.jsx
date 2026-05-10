@@ -1,7 +1,7 @@
 // src/App.js
 import * as React from 'react';
 import { useState } from 'react';
-import { Container } from '@mui/material';
+import { Container, Alert } from '@mui/material';
 import useAppData from './hooks/useAppData';
 import Header from './components/Header';
 import ZonesGrid from './components/ZonesGrid';
@@ -89,8 +89,15 @@ export default function App() {
         }
     };
 
+    const freezeWarning = sensorData?.weather?.freeze_warning === true;
+
     return (
         <Container sx={{marginY: 4}}>
+            {freezeWarning && (
+                <Alert severity="warning" variant="filled" sx={{ mb: 2, borderRadius: 2, fontWeight: 600, fontSize: '1rem' }}>
+                    Freezing temperatures forecast in the next 12 hours — protect your garden pipes and hoses!
+                </Alert>
+            )}
             <Header sensorData={sensorData} />
             <ZonesGrid sensorData={sensorData} onOpenWaterDialog={(zone) => openWaterDialog(zone)} />
             <Footer manifest={manifest} />

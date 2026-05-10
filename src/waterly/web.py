@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025,2026 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 import os
@@ -249,6 +249,19 @@ def get_latest_sensors():
         weather["next12"]["soil_moisture_unit"] = Unit.PERCENT
         forecast_time = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
         weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
+        next12_min = weather.get("next12", {}).get("temp_min")
+        next12_unit = weather.get("next12", {}).get("temp_unit")
+        freeze_point = 32.0 if next12_unit == Unit.FAHRENHEIT else 0.0
+        season = CONFIG[Settings.GARDENING_SEASON]
+        try:
+            sm, sd = [int(x) for x in season.get("start", Settings.GARDENING_SEASON.default["start"]).split("-")]
+            em, ed = [int(x) for x in season.get("stop", Settings.GARDENING_SEASON.default["stop"]).split("-")]
+            t = (now.month, now.day)
+            start_md, end_md = (sm, sd), (em, ed)
+            in_season = (start_md <= t <= end_md) if start_md <= end_md else (t >= start_md or t <= end_md)
+        except Exception:
+            in_season = False
+        weather["freeze_warning"] = in_season and next12_min is not None and next12_min <= freeze_point
         result["weather"] = weather
         result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars if ABOUT.wifi_rssi is not None else 0
         return jsonify(result)
