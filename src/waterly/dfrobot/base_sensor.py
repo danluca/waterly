@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 # python
@@ -261,6 +261,8 @@ class BaseRS485ModbusSensor:
             # self._logger.debug(f"Reading 1 register at {reg_addr} func {other_data_func}")
             sleep(0.25)
             data = self.__read_registers(other_data_func, reg_addr, 1)
+            if data is None:
+                raise mdb_exc.ModbusError(f"No response from device {self.device_addr:#X} on either function code")
             # Normalize to signed 16-bit in the fallback path as well
             return self._to_int16(data[0])
 

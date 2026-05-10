@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 import threading
@@ -438,15 +438,18 @@ class WateringManager:
         self._logger.info("Starting WateringManager")
         # Sensors polling loop and daily schedule orchestration
         while not self._stop.is_set():
-            self._handle_thread_messages()
+            try:
+                self._handle_thread_messages()
 
-            self._handle_sensor_polling()
+                self._handle_sensor_polling()
 
-            self._handle_manual_watering()  # we give priority to manually invoked watering
+                self._handle_manual_watering()  # we give priority to manually invoked watering
 
-            self._handle_auto_watering()
+                self._handle_auto_watering()
 
-            self._handle_about_info()
+                self._handle_about_info()
+            except Exception as e:
+                self._logger.error(f"WateringManager iteration failed, will retry next tick: {e}", exc_info=True)
 
             self._stop.wait(15.0)
 
