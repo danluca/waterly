@@ -175,8 +175,8 @@ class Patch:
 
         :return: None
         """
-        self.rh_sensor.close() if self.has_rh_sensor else None
-        self.npk_sensor.close() if self.has_npk_sensor else None
+        self.rh_sensor.close() if self.rh_sensor and self.rh_sensor.is_open else None
+        self.npk_sensor.close() if self.npk_sensor and self.npk_sensor.is_open else None
 
     def humidity(self) -> Optional[Measurement]:
         """

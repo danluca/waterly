@@ -479,9 +479,8 @@ class WateringManager:
                     self._logger.error(f"Sensors reading failed for zone {patch.zone.name}: {e}", exc_info=True)
                 time.sleep(0.25)
         finally:
-            # All garden sensors share the same RS-485 bus; closing via the first patch closes it for all.
-            if self.patches:
-                self.patches[0].close_sensor_bus()
+            for patch in self.patches:
+                patch.close_sensor_bus()
         self._logger.info("Polling sensors for all zones complete. Storing readings")
 
         for patch, readings in all_readings.items():
