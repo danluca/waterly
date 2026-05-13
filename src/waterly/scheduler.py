@@ -476,7 +476,18 @@ class WateringManager:
                     self._logger.info(f"Polling sensors for zone {patch.zone.name}...")
                     all_readings[patch] = patch.measurements()  # dictionary of temp, humidity, ec, ph, salinity, tds, nitrogen, phosphorus, potassium
                 except Exception as e:
-                    self._logger.error(f"Sensors reading failed for zone {patch.zone.name}: {e}", exc_info=True)
+                    # Check RX buffer: non-zero bytes after a timeout means bus contention (something transmitting
+                    # unexpectedly); zero means sensors are genuinely silent (firmware hang / power issue).
+                    rx = patch.rh_sensor._serial.in_waiting if patch.rh_sensor and patch.rh_sensor.is_open else -1
+                    bus_diag = f"bus contention ({rx} unexpected RX bytes)" if rx > 0 else ("sensors silent (empty RX buffer)" if rx == 0 else "bus state unknown")
+                    self._logger.warning(f"Sensors reading failed for zone {patch.zone.name}: {e} [{bus_diag}], retrying immediately")
+                    try:
+                        patch.close_sensor_bus()
+                        time.sleep(1.0)
+                        patch.open_sensor_bus()
+                        all_readings[patch] = patch.measurements()
+                    except Exception as retry_e:
+                        self._logger.error(f"Sensors reading retry failed for zone {patch.zone.name}: {retry_e}", exc_info=True)
                 time.sleep(0.25)
         finally:
             for patch in self.patches:
@@ -506,13 +517,17 @@ class WateringManager:
         # Get the env Zone object (or None if not found)
         env_zone = next((z for z in ZONES.values() if z.name == ENV_ZONE_NAME), None)
         sensor = SEN0438(env_zone.rh_sensor_address)
-        sensor.open()
-        env_readings = sensor.read_all()
-        env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
-        record_env_temperature(env_temp if metric else env_temp.convert(Unit.FAHRENHEIT))
-        env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
-        record_env_humidity(env_humid)
-        sensor.close()
+        try:
+            sensor.open()
+            env_readings = sensor.read_all()
+            env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
+            record_env_temperature(env_temp if metric else env_temp.convert(Unit.FAHRENHEIT))
+            env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
+            record_env_humidity(env_humid)
+        except Exception as e:
+            self._logger.warning(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read failed, skipping: {e}")
+        finally:
+            sensor.close()
         self._logger.info("Storage of sensor readings finished")
 
     def _perform_watering(self, weather_assessment: WateringAssessment):
@@ -551,8 +566,16 @@ class WateringManager:
                 # Turn on the zone
                 patch.start_watering()
                 zone_done = False
-                humid_start = patch.humidity()
-                self._logger.info(f"Watering zone {patch.zone.name} started at humidity level {humid_start.value:.2f}%")
+                try:
+                    humid_start = patch.humidity()
+                except Exception as e:
+                    humid_start = None
+                    self._logger.warning(f"Sensor read failed for zone {patch.zone.name} at watering start, "
+                                         f"using default {self._max_minutes} min: {e}")
+                if humid_start is not None:
+                    self._logger.info(f"Watering zone {patch.zone.name} started at humidity level {humid_start.value:.2f}%")
+                else:
+                    self._logger.info(f"Watering zone {patch.zone.name} started (sensor unavailable, using default {self._max_minutes} min)")
                 while not zone_done and (int(time.time()) - start_ts) < (self._max_minutes * 60):
                     # Use stop event so a shutdown interrupts the wait immediately
                     self._stop.wait(10.0)
@@ -560,26 +583,35 @@ class WateringManager:
                         return
                     # Drain the message queue so STOP_WATERING requests aren't silently dropped
                     self._handle_thread_messages()
-                    # Check humidity threshold
-                    if not patch.check_needs_watering():
-                        zone_done = True
-                        m,s = divmod((int(time.time()) - start_ts), 60)
-                        self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
-                                          f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min")
+                    # Check humidity threshold; sensor failures are non-fatal — fall through to the time limit
+                    try:
+                        if not patch.check_needs_watering():
+                            zone_done = True
+                            m,s = divmod((int(time.time()) - start_ts), 60)
+                            self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
+                                              f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min")
+                    except Exception as e:
+                        self._logger.warning(f"Sensor read failed during watering for zone {patch.zone.name}, "
+                                             f"continuing with default time ({self._max_minutes} min): {e}")
                 # Turn off the zone
                 patch.stop_watering()
                 stop_ts = int(time.time())
-                humid_stop = patch.humidity()
+                try:
+                    humid_stop = patch.humidity()
+                except Exception:
+                    humid_stop = None
                 patch.close_sensor_bus()
                 cur_local_time = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
 
                 # Compute water used during this watering cycle
                 water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit)
-                msmt = WateringMeasurement(cur_local_time, water_amount, water_unit, humid_start.value, humid_stop.value, stop_ts-start_ts)
+                msmt = WateringMeasurement(cur_local_time, water_amount, water_unit,
+                                           getattr(humid_start, 'value', 0.0), getattr(humid_stop, 'value', 0.0), stop_ts-start_ts)
                 record_watering(patch.zone.name, msmt)
                 m,s = divmod((stop_ts-start_ts), 60)
+                humid_stop_str = f"{humid_stop.value:.2f}%" if humid_stop else "N/A (sensor unavailable)"
                 self._logger.info(f"Zone {patch.zone.name} watered for {m:02d}:{s:02d} min. Used ~{msmt.value:.2f} "
-                                  f"{msmt.unit} of water and ended at humidity level {humid_stop.value:.2f}%")
+                                  f"{msmt.unit} of water and ended at humidity level {humid_stop_str}")
                 record_waterlog(WateringRecord(patch.zone, True, msmt), weather_assessment)
                 # Wait a bit before starting the next zone; allows the water valves to close properly before starting the next one
                 self._stop.wait(10.0)
