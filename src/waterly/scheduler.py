@@ -9,7 +9,7 @@ import logging
 import subprocess
 from datetime import datetime, time as dtime
 from typing import Optional
-from gpiozero import CPUTemperature
+from gpiozero import CPUTemperature, OutputDevice
 
 from .dfrobot.sen0438 import SEN0438
 from .config import CONFIG, Settings, UnitType, ZONES, ENV_ZONE_NAME
@@ -26,6 +26,7 @@ from .weather import WeatherService
 
 _logger = logging.getLogger(__name__)
 
+fan_relay: OutputDevice = OutputDevice(13)
 
 def _parse_month_day(md: str) -> tuple[int, int] | None:
     try:
@@ -49,6 +50,17 @@ def is_in_gardening_season(dt: datetime) -> bool:
     if start_md <= end_md:
         return start_md <= t <= end_md
     return t >= start_md or t <= end_md
+
+def fan_on():
+    """Turns on the fan to improve air circulation and reduce RPi temperature."""
+    fan_relay.on()
+    logging.getLogger(__name__).info("Fan turned on")
+
+
+def fan_off():
+    """Turns off the fan to conserve energy and fan's life span."""
+    fan_relay.off()
+    logging.getLogger(__name__).info("Fan turned off")
 
 
 class WateringManager:
@@ -513,21 +525,34 @@ class WateringManager:
         # read RPI Zero board temperature
         rpi_temp = Measurement(CPUTemperature().temperature, Unit.CELSIUS, ts)
         record_rpi_temperature(rpi_temp if metric else rpi_temp.convert(Unit.FAHRENHEIT))
+        # act upon the RPi's temperature and decide whether to activate the fan: fan on if temp > 110F, off if < 90F
+        temp_f = float(rpi_temp.convert(Unit.FAHRENHEIT).value or 0.0)
+        if temp_f > 110.0:
+            self._logger.info(f"RPi temperature {temp_f:.2f}F exceeds 110F, activating fan")
+            fan_on()
+        elif temp_f < 90.0:
+            self._logger.info(f"RPi temperature {temp_f:.2f}F is below 90F, deactivating fan")
+            fan_off()
         # read env temperature and humidity
         # Get the env Zone object (or None if not found)
         env_zone = next((z for z in ZONES.values() if z.name == ENV_ZONE_NAME), None)
-        sensor = SEN0438(env_zone.rh_sensor_address)
-        try:
-            sensor.open()
-            env_readings = sensor.read_all()
-            env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
-            record_env_temperature(env_temp if metric else env_temp.convert(Unit.FAHRENHEIT))
-            env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
-            record_env_humidity(env_humid)
-        except Exception as e:
-            self._logger.warning(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read failed, skipping: {e}")
-        finally:
-            sensor.close()
+        if env_zone is None:
+            self._logger.warning(f"Environment zone '{ENV_ZONE_NAME}' not found, skipping env sensor readings")
+        else:
+            sensor = SEN0438(env_zone.rh_sensor_address)
+            try:
+                sensor.open()
+                env_readings = sensor.read_all()
+                env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
+                env_temp_r = env_temp if metric else env_temp.convert(Unit.FAHRENHEIT)
+                record_env_temperature(env_temp_r)
+                env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
+                record_env_humidity(env_humid)
+                self._logger.info(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read successful; readings Temp {env_temp_r.value:.2f} {env_temp_r.unit}, RH {env_humid.value:.2f}%")
+            except Exception as e:
+                self._logger.warning(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read failed, skipping: {e}")
+            finally:
+                sensor.close()
         self._logger.info("Storage of sensor readings finished")
 
     def _perform_watering(self, weather_assessment: WateringAssessment):

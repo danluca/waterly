@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # MIT License
-# Copyright (c) 2025,2026 by Dan Luca. All rights reserved.
+# Copyright (c) by Dan Luca. All rights reserved.
 """
 rs485_scan.py — RS485 bus connectivity probe for GardenPy using the dfrobot sensor classes.
 
@@ -70,6 +70,7 @@ def probe_sensor(sensor_cls, addr: int, port: str, baud: int, timeout: float) ->
     """
     sensor = sensor_cls(deviceaddr=addr, port=port, baudrate=baud, timeout=timeout)
     try:
+        sensor.open()
         passed = sensor.is_connected()
         readings = []
         if passed:
