@@ -106,7 +106,7 @@ class WeatherService:
             past_12h_rain += w.precipitation_amount.value
             past_12h_soil_humidity += w.soil_humidity.value
         for w in next_12h_data:
-            next_12h_prob = max(next_12h_prob, w.precipitation_prob.value)
+            next_12h_prob = max(next_12h_prob, w.precipitation_prob_value)
             next_12h_rain += w.precipitation_amount.value
             next_12h_soil_humidity += w.soil_humidity.value
         precip_unit: Unit = next_12h_data[-1].precipitation_amount.unit
@@ -315,7 +315,7 @@ class WeatherService:
                 if now >= w.timestamp >= horizon_from:
                     past_12h_rain += w.precipitation_amount.value
                 if horizon_to >= w.timestamp > now:
-                    next_12h_prob = max(next_12h_prob, w.precipitation_prob.value)
+                    next_12h_prob = max(next_12h_prob, w.precipitation_prob_value)
                     next_12h_rain += w.precipitation_amount.value
             with self._lock:
                 self._last_update = now

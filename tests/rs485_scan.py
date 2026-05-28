@@ -80,6 +80,8 @@ def probe_sensor(sensor_cls, addr: int, port: str, baud: int, timeout: float) ->
                     readings.append((rtype.value, fmt(value)))
             except Exception as exc:
                 readings.append(("read_all", f"ERROR: {exc}"))
+        else:
+            readings.append(("is_connected", "no response"))
         return passed, readings
     except Exception as e1:
         return False, [("probe", f"ERROR: {e1}")]
@@ -113,7 +115,7 @@ def main():
             sys.exit(2)
 
         if not passed:
-            print("    FAIL  — no response from sensor")
+            print(f"    FAIL  — no response from sensor {readings[0][0]}: {readings[0][1]}")
         else:
             for label, display in readings:
                 print(f"    ok    {label:<30}  {display}")

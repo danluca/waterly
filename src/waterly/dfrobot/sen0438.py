@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 
 from enum import Enum
@@ -167,7 +167,12 @@ class SEN0438(BaseRS485ModbusSensor):
         """
         This information is not mapped onto a register for SEN0438. The REG_DEVICE_ADDRESS register usually holds 0.
         """
-        return self._read_one(self.REG_DEVICE_ADDRESS)
+        #return self._read_one(self.REG_DEVICE_ADDRESS)
+        # noinspection PyBroadException
+        try:
+            return int(self._read_one(self.REG_DEVICE_ADDRESS))
+        except Exception:
+            return None
 
     def get_device_id(self) -> Optional[int]:
         """

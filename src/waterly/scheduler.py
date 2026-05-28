@@ -15,6 +15,7 @@ from .dfrobot.sen0438 import SEN0438
 from .config import CONFIG, Settings, UnitType, ZONES, ENV_ZONE_NAME
 from .model.about import ABOUT
 from .model.measurement import WateringMeasurement, Measurement, convert_measurement
+from .model.times import now_local
 from .model.water_log import WateringRecord, WateringAssessment
 from .model.units import Unit
 from .patch import Patch
@@ -61,6 +62,11 @@ def fan_off():
     """Turns off the fan to conserve energy and fan's life span."""
     fan_relay.off()
     logging.getLogger(__name__).info("Fan turned off")
+
+
+def is_fan_on():
+    """Checks if the fan is currently on."""
+    return True if fan_relay.value else False
 
 
 class WateringManager:
@@ -199,7 +205,11 @@ class WateringManager:
                     try:
                         patch.stop_watering()
                         stop_ts = now_ts
-                        humid_stop = patch.humidity()
+                        try:
+                            humid_stop = patch.humidity()
+                        except Exception as e:
+                            humid_stop = None
+                            self._logger.warning(f"Sensor read failed on STOP_WATERING for zone {zone_name}: {e}")
                         patch.close_sensor_bus()
                         water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit)
                         start_h = info.get("humid_start")
@@ -213,7 +223,8 @@ class WateringManager:
                         except Exception as e:
                             self._logger.error(f"Failed to record STOP_WATERING measurements for zone {patch.zone.name}: {e}", exc_info=True)
                         m, s = divmod(duration, 60)
-                        self._logger.info(f"Manual watering STOP for zone {zone_name} at {humid_stop.value:.2f}% RH after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit}")
+                        humid_stop_str = f"{humid_stop.value:.2f}%" if humid_stop is not None else "N/A (sensor unavailable)"
+                        self._logger.info(f"Manual watering STOP for zone {zone_name} at {humid_stop_str} RH after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit}")
                     finally:
                         self._manual_mode.pop(zone_name, None)
                 else:
@@ -364,14 +375,19 @@ class WateringManager:
                         del self._manual_mode[zone_name]
                         continue
                     self.pulses.reset_count()
-                    humid_start = patch.humidity()
+                    try:
+                        humid_start = patch.humidity()
+                    except Exception as e:
+                        humid_start = None
+                        self._logger.warning(f"Sensor read failed at manual watering start for zone {zone_name}: {e}")
                     info["humid_start"] = humid_start
                     patch.start_watering()
                     info.update({
                         "state": "running",
                         "start_ts": now_ts
                     })
-                    self._logger.info(f"Manual watering started for zone {zone_name} at {humid_start.value:.2f}% RH")
+                    humid_start_str = f"{humid_start.value:.2f}% RH" if humid_start is not None else "N/A (sensor unavailable)"
+                    self._logger.info(f"Manual watering started for zone {zone_name} at {humid_start_str}")
                     self._manual_mode[zone_name] = info
                     continue
 
@@ -383,8 +399,13 @@ class WateringManager:
                         # Finalize watering and persist records
                         patch.stop_watering()
                         stop_ts = now_ts
-                        patch.open_sensor_bus()     # ensure the bus is open for final readings (a poll sensor call while in running state would close the bus)
-                        humid_stop = patch.humidity()
+                        # ensure the bus is open for final readings (a poll sensor call while in running state would close the bus)
+                        try:
+                            patch.open_sensor_bus()
+                            humid_stop = patch.humidity()
+                        except Exception as e:
+                            humid_stop = None
+                            self._logger.warning(f"Sensor read failed at manual watering stop for zone {zone_name}: {e}")
                         # noinspection PyBroadException
                         try:
                             patch.close_sensor_bus()
@@ -402,7 +423,8 @@ class WateringManager:
                         except Exception as e:
                             self._logger.error(f"Failed to record manual watering measurements for zone {patch.zone.name}: {e}", exc_info=True)
                         m, s = divmod(duration, 60)
-                        self._logger.info(f"Manual watering finished for zone {zone_name} at {humid_stop.value:.2f}% RH after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit} of water")
+                        humid_stop_str = f"{humid_stop.value:.2f}% RH" if humid_stop is not None else "N/A (sensor unavailable)"
+                        self._logger.info(f"Manual watering finished for zone {zone_name} at {humid_stop_str} after {m:02d}:{s:02d}; used ~{msmt.value:.2f} {msmt.unit} of water")
                         # Cleanup
                         self._manual_mode.pop(zone_name, None)
                         continue
@@ -516,6 +538,8 @@ class WateringManager:
                     self._logger.info(f"RHTemp at zone {zone}: {readings[TrendName.HUMIDITY].value:.2f}% @ "
                                       f"{temp.value:.2f} {temp.unit}")
                     self._logger.info(f"RHTemp sensor readings @ {patch.rh_sensor.device_addr:#02X} for zone {zone} have been recorded")
+                else:
+                    self._logger.info(f"No RHTemp readings available for zone {zone}")
                 if readings.get(TrendName.NITROGEN) is not None:
                     record_npk(zone, readings[TrendName.NITROGEN], readings[TrendName.PHOSPHORUS], readings[TrendName.POTASSIUM])
                     self._logger.info(f"NPK sensor readings @ {patch.npk_sensor.device_addr:#02X} for zone {zone} have been recorded")
@@ -524,15 +548,10 @@ class WateringManager:
         ts = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
         # read RPI Zero board temperature
         rpi_temp = Measurement(CPUTemperature().temperature, Unit.CELSIUS, ts)
-        record_rpi_temperature(rpi_temp if metric else rpi_temp.convert(Unit.FAHRENHEIT))
-        # act upon the RPi's temperature and decide whether to activate the fan: fan on if temp > 110F, off if < 90F
-        temp_f = float(rpi_temp.convert(Unit.FAHRENHEIT).value or 0.0)
-        if temp_f > 110.0:
-            self._logger.info(f"RPi temperature {temp_f:.2f}F exceeds 110F, activating fan")
-            fan_on()
-        elif temp_f < 90.0:
-            self._logger.info(f"RPi temperature {temp_f:.2f}F is below 90F, deactivating fan")
-            fan_off()
+        rpi_temp_u = rpi_temp if metric else rpi_temp.convert(Unit.FAHRENHEIT)
+        record_rpi_temperature(rpi_temp_u)
+        self._logger.info(f"RPi Zero board temperature {rpi_temp_u.value:.2f} {rpi_temp_u.unit}")
+        self.adjust_cooling(rpi_temp)
         # read env temperature and humidity
         # Get the env Zone object (or None if not found)
         env_zone = next((z for z in ZONES.values() if z.name == ENV_ZONE_NAME), None)
@@ -542,18 +561,39 @@ class WateringManager:
             sensor = SEN0438(env_zone.rh_sensor_address)
             try:
                 sensor.open()
-                env_readings = sensor.read_all()
-                env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
-                env_temp_r = env_temp if metric else env_temp.convert(Unit.FAHRENHEIT)
-                record_env_temperature(env_temp_r)
-                env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
-                record_env_humidity(env_humid)
-                self._logger.info(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read successful; readings Temp {env_temp_r.value:.2f} {env_temp_r.unit}, RH {env_humid.value:.2f}%")
+                if not sensor.is_present:
+                    self._logger.info(f"No env sensor readings available (0X{env_zone.rh_sensor_address:X})")
+                else:
+                    env_readings = sensor.read_all()
+                    env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
+                    env_temp_r = env_temp if metric else env_temp.convert(Unit.FAHRENHEIT)
+                    record_env_temperature(env_temp_r)
+                    env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
+                    record_env_humidity(env_humid)
+                    self._logger.info(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read successful; readings Temp {env_temp_r.value:.2f} {env_temp_r.unit}, RH {env_humid.value:.2f}%")
             except Exception as e:
                 self._logger.warning(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read failed, skipping: {e}")
             finally:
                 sensor.close()
         self._logger.info("Storage of sensor readings finished")
+
+    def adjust_cooling(self, rpi_temp: Measurement):
+        """Adjust the cooling solution (fan) based on RPi temperature."""
+        # act upon the RPi's temperature and decide whether to activate the fan: fan on if temp > 110F, off if < 90F
+        temp_f = float(rpi_temp.convert(Unit.FAHRENHEIT).value or 0.0)
+        fan_running = is_fan_on()
+        if temp_f > 110.0:
+            if fan_running:
+                self._logger.info(f"RPi temperature {temp_f:.2f}F exceeds 110F, fan is already on")
+            else:
+                self._logger.info(f"RPi temperature {temp_f:.2f}F exceeds 110F, activating fan")
+                fan_on()
+        elif temp_f < 90.0:
+            if fan_running:
+                self._logger.info(f"RPi temperature {temp_f:.2f}F is below 90F, deactivating fan")
+                fan_off()
+            else:
+                self._logger.info(f"RPi temperature {temp_f:.2f}F is below 90F, fan is already off")
 
     def _perform_watering(self, weather_assessment: WateringAssessment):
         """
@@ -576,14 +616,18 @@ class WateringManager:
             self._logger.warning(f"Water leakage detected between watering cycles: {water_leak.convert(water_unit).value:.2f} {water_unit}")
         try:
             for patch in sorted(self.patches, key=lambda p: p.zone.name):
-                # check whether humidity is already above target for this zone
-                if not patch.needs_watering():
+                # check whether humidity is already above target for this zone;
+                # skip only when a fresh reading confirms it — no reading means fall back to schedule-based
+                if patch.current_humidity is not None and not patch.needs_watering():
                     self._logger.info(f"Watering canceled for zone {patch.zone.name} due to target humidity reached: "
-                                      f"{patch.current_humidity.value:.2f}% >= {patch.target_humidity:.2f}%")
-                    msmt = WateringMeasurement(patch.current_humidity.timestamp, 0, water_unit, patch.target_humidity,
-                                               patch.current_humidity.value, 0)
+                                      f"{patch.current_humidity_value:.2f}% >= {patch.target_humidity:.2f}%")
+                    msmt = WateringMeasurement(patch.current_humidity.timestamp,
+                                   0, water_unit, patch.target_humidity, patch.current_humidity_value, 0)
                     record_waterlog(WateringRecord(patch.zone, False, msmt), weather_assessment)
                     continue
+                if patch.current_humidity is None:
+                    self._logger.warning(f"No sensor reading available for zone {patch.zone.name} - "
+                                         f"falling back to schedule-based watering ({self._max_minutes} min)")
 
                 patch.open_sensor_bus()
                 self.pulses.reset_count()
@@ -629,7 +673,7 @@ class WateringManager:
                 cur_local_time = datetime.now(CONFIG[Settings.LOCAL_TIMEZONE])
 
                 # Compute water used during this watering cycle
-                water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit)
+                water_amount = convert_measurement(self.pulses.read_and_reset(), Unit.LITERS, water_unit) or 0.0
                 msmt = WateringMeasurement(cur_local_time, water_amount, water_unit,
                                            getattr(humid_start, 'value', 0.0), getattr(humid_stop, 'value', 0.0), stop_ts-start_ts)
                 record_watering(patch.zone.name, msmt)

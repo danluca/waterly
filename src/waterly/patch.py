@@ -107,6 +107,25 @@ class Patch:
         """
         return self._last_humidity_reading
 
+    @property
+    def current_humidity_value(self) -> float:
+        """
+        Gets the current humidity value as a float.
+
+        This property retrieves the current humidity value from the last humidity
+        reading. If no reading is available or the value is missing, it returns 0.0.
+
+        :return: The current humidity value.
+        :rtype: float
+        """
+        msmt = self._last_humidity_reading
+        if msmt is None:
+            return 0.0
+        msmt_value = msmt.value
+        if msmt_value is None:
+            return 0.0
+        return float(msmt_value)
+
     def start_watering(self) -> None:
         """
         Starts the watering process by activating the water relay. This updates
@@ -335,6 +354,7 @@ class Patch:
     def needs_watering(self):
         """
         Determines whether this patch requires watering based on the last humidity reading compared to the target humidity.
+        Returns False when no reading is available; callers that want schedule-based fallback must check current_humidity first.
 
         :return: True if watering is needed; False otherwise
         :rtype: bool
@@ -367,6 +387,7 @@ class Patch:
         :return: Whether a drought condition exists (True/False)
         """
         if self._last_humidity_reading is None:
+            self._logger.debug(f"Drought check skipped for zone {self.zone.name} - no sensor reading available")
             return False
         drought: bool = self._last_humidity_reading.value < self.min_sensor_humidity
         if drought:

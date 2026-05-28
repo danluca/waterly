@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 # from dataclasses import dataclass
 from datetime import datetime
@@ -115,6 +115,16 @@ class WeatherData:
     @property
     def precipitation_prob(self) -> Optional[Measurement]:
         return self._precipitation_prob
+
+    @property
+    def precipitation_prob_value(self) -> float:
+        msmt = self._precipitation_prob
+        if msmt is None:
+            return 0.0
+        msmt_value = msmt.value
+        if msmt_value is None:
+            return 0.0
+        return float(msmt_value)
 
     @property
     def surface_pressure(self) -> Optional[Measurement]:
