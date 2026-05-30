@@ -6,7 +6,7 @@
  */
 
 import * as React from 'react';
-import {Box, Card, Grid, Typography} from '@mui/material';
+import {Box, Card, Chip, Grid, Typography} from '@mui/material';
 import SensorCard from './SensorCard';
 import { fmt } from '../utils/format';
 
@@ -60,9 +60,14 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
               <Typography variant="overline" color="text.secondary">
                 {zone.desc || 'Zone'}
               </Typography>
-              <Typography variant="h6" sx={{mt: 0.5}}>
-                • {zone.date} {zone.time ? `@ ${zone.time}` : ''}
-              </Typography>
+              <Box sx={{display: 'flex', alignItems: 'center', gap: 1, mt: 0.5}}>
+                <Typography variant="h6">
+                  • {zone.date} {zone.time ? `@ ${zone.time}` : ''}
+                </Typography>
+                {n === 'RPI' && zone.fan_on !== undefined && (
+                  <Chip label={zone.fan_on ? 'Fan ON' : 'Fan OFF'} color={zone.fan_on ? 'success' : 'default'} size="small" />
+                )}
+              </Box>
               <Box sx={{
                 mt: 0.5,
                 display: 'grid',

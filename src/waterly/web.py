@@ -16,7 +16,7 @@ from werkzeug.exceptions import HTTPException
 
 from .patch import PATCHES
 from .queues import send_message_to_scheduler, QueueMessage, Action
-from .scheduler import is_in_gardening_season
+from .scheduler import is_in_gardening_season, is_fan_on
 from .model.measurement import convert_measurement_unit_type
 from .model.times import valid_timezone, now_local
 from .model.units import UnitType, Unit
@@ -256,6 +256,7 @@ def get_latest_sensors():
         weather["freeze_warning"] = is_in_gardening_season(now) and next12_min is not None and next12_min <= freeze_point
         result["weather"] = weather
         result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars if ABOUT.wifi_rssi is not None else 0
+        result[RPI_ZONE_NAME]["fan_on"] = is_fan_on()
         return jsonify(result)
 
 @app.post("/api/water/<string:zone_name>/start")
