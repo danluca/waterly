@@ -102,6 +102,7 @@ class WateringManager:
         hh, mm = [int(x) for x in CONFIG[Settings.WATERING_START_TIME].split(":")]
         self._start_time: dtime = dtime(hh, mm)
         self._max_minutes: int = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
+        self._min_minutes: int = CONFIG[Settings.WATERING_MIN_MINUTES_PER_ZONE]
         self._logger = logging.getLogger(__name__)
         self._manual_mode: dict = {}
         self._last_sensor_poll: int = 0
@@ -119,6 +120,7 @@ class WateringManager:
         hh, mm = [int(x) for x in CONFIG[Settings.WATERING_START_TIME].split(":")]
         self._start_time = dtime(hh, mm)
         self._max_minutes = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
+        self._min_minutes = CONFIG[Settings.WATERING_MIN_MINUTES_PER_ZONE]
 
     def stop(self):
         """
@@ -163,6 +165,7 @@ class WateringManager:
                 hh, mm = [int(x) for x in CONFIG[Settings.WATERING_START_TIME].split(":")]
                 self._start_time = dtime(hh, mm)
                 self._max_minutes = CONFIG[Settings.WATERING_MAX_MINUTES_PER_ZONE]
+                self._min_minutes = CONFIG[Settings.WATERING_MIN_MINUTES_PER_ZONE]
                 self._last_watering_date = CONFIG[Settings.LAST_WATERING_DATE]
                 for p in self.patches:
                     p.min_sensor_humidity = CONFIG[Settings.MINIMUM_SENSOR_HUMIDITY_PERCENT][p.zone.name]
@@ -652,13 +655,21 @@ class WateringManager:
                         return
                     # Drain the message queue so STOP_WATERING requests aren't silently dropped
                     self._handle_thread_messages()
-                    # Check humidity threshold; sensor failures are non-fatal — fall through to the time limit
+                    # Check humidity threshold; sensor failures are non-fatal — fall through to the time limit.
+                    # Keep the valve running for at least the configured minimum even once the target is reached.
                     try:
+                        elapsed = int(time.time()) - start_ts
+                        min_reached = elapsed >= (self._min_minutes * 60)
                         if not patch.check_needs_watering():
-                            zone_done = True
-                            m,s = divmod((int(time.time()) - start_ts), 60)
-                            self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
-                                              f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min")
+                            m,s = divmod(elapsed, 60)
+                            if min_reached:
+                                zone_done = True
+                                self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
+                                                  f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min")
+                            else:
+                                self._logger.info(f"Zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
+                                                  f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min, but continuing "
+                                                  f"until minimum watering time of {self._min_minutes} min is met")
                     except Exception as e:
                         self._logger.warning(f"Sensor read failed during watering for zone {patch.zone.name}, "
                                              f"continuing with default time ({self._max_minutes} min): {e}")

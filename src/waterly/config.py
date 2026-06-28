@@ -68,6 +68,7 @@ class Settings(StrEnum):
     HUMIDITY_TARGET_PERCENT = "humidity_target_percent", {"Z1":70.0, "Z2":70.0, "Z3":70.0}
     WATERING_START_TIME = "watering_start_time", "20:30"                            # 8:30pm
     WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", 10
+    WATERING_MIN_MINUTES_PER_ZONE = "watering_min_minutes_per_zone", 5
     LAST_WATERING_DATE = "last_watering_date", None
     RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 50.0   # 50%
     UNITS = "units", UnitType.IMPERIAL

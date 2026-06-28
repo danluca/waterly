@@ -372,6 +372,12 @@ def update_config():
         except Exception as e:
             errors.append({"setting": Settings.WATERING_MAX_MINUTES_PER_ZONE, "message": f"Must be integer: {e}"})
 
+    if Settings.WATERING_MIN_MINUTES_PER_ZONE.name in body:
+        try:
+            set_value(Settings.WATERING_MIN_MINUTES_PER_ZONE, int(body[Settings.WATERING_MIN_MINUTES_PER_ZONE.name]))
+        except Exception as e:
+            errors.append({"setting": Settings.WATERING_MIN_MINUTES_PER_ZONE, "message": f"Must be integer: {e}"})
+
     if Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD.name in body:
         try:
             set_value(Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD, float(body[Settings.RAIN_CANCEL_PROBABILITY_THRESHOLD.name]))

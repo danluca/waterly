@@ -4,5 +4,6 @@ node_modules/
 build/
 data/
 logs/
+__pycache__/
 src/web/static/manifest.json
 frontend/public/api/manifest

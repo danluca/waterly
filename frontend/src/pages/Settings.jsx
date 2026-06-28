@@ -22,6 +22,7 @@ const friendlyLabels = {
   SENSOR_READ_INTERVAL_SECONDS: 'Sensor poll interval (mm:ss)',
   TREND_MAX_SAMPLES: 'Trend max size',
   WATERING_MAX_MINUTES_PER_ZONE: 'Watering max time (mm:ss)',
+  WATERING_MIN_MINUTES_PER_ZONE: 'Watering min time (mm:ss)',
   WATERING_START_TIME: 'Watering start time (HH:MM)',
   RAIN_CANCEL_PROBABILITY_THRESHOLD: 'Rain cancel threshold (%)',
   WEATHER_CHECK_PRE_WATERING_SECONDS: 'Weather pre-check offset (mm:ss)',
@@ -223,8 +224,8 @@ export default function SettingsPage() {
       );
     }
 
-    // Special mm:ss editor for minute-based field (store minutes)
-    if (key === 'WATERING_MAX_MINUTES_PER_ZONE') {
+    // Special mm:ss editor for minute-based fields (store minutes)
+    if (key === 'WATERING_MAX_MINUTES_PER_ZONE' || key === 'WATERING_MIN_MINUTES_PER_ZONE') {
       const minutes = Number(edited[key] ?? 0);
       const display = `${String(Math.max(0, Math.floor(minutes))).padStart(2, '0')}:00`;
       return (
@@ -277,6 +278,7 @@ export default function SettingsPage() {
                 {renderPrimitiveField('SENSOR_READ_INTERVAL_SECONDS', edited.SENSOR_READ_INTERVAL_SECONDS)}
                 {renderPrimitiveField('TREND_MAX_SAMPLES', edited.TREND_MAX_SAMPLES)}
                 {renderPrimitiveField('WATERING_MAX_MINUTES_PER_ZONE', edited.WATERING_MAX_MINUTES_PER_ZONE)}
+                {renderPrimitiveField('WATERING_MIN_MINUTES_PER_ZONE', edited.WATERING_MIN_MINUTES_PER_ZONE)}
                 {renderPrimitiveField('WATERING_START_TIME', edited.WATERING_START_TIME)}
                 {renderPrimitiveField('RAIN_CANCEL_PROBABILITY_THRESHOLD', edited.RAIN_CANCEL_PROBABILITY_THRESHOLD)}
                 {renderPrimitiveField('WEATHER_CHECK_INTERVAL_SECONDS', edited.WEATHER_CHECK_INTERVAL_SECONDS)}
