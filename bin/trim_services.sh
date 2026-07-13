@@ -87,8 +87,10 @@ do_enable() {
 
 do_status() {
   for svc in "${SERVICES[@]}"; do
-    state=$(systemctl is-enabled "$svc" 2>/dev/null || echo "n/a")
-    active=$(systemctl is-active "$svc" 2>/dev/null || echo "n/a")
+    state=$(systemctl is-enabled "$svc" 2>/dev/null || true)
+    active=$(systemctl is-active "$svc" 2>/dev/null || true)
+    [[ -n "$state" ]] || state="n/a"
+    [[ -n "$active" ]] || active="n/a"
     printf "  %-32s enabled=%-10s active=%s\n" "$svc" "$state" "$active"
   done
   if [[ -f "$CLOUD_INIT_FLAG" ]]; then
