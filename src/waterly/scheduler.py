@@ -664,10 +664,10 @@ class WateringManager:
                             m,s = divmod(elapsed, 60)
                             if min_reached:
                                 zone_done = True
-                                self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
+                                self._logger.info(f"Watering zone {patch.zone.name} reached humidity level {patch.current_humidity_value:.2f}% "
                                                   f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min")
                             else:
-                                self._logger.info(f"Zone {patch.zone.name} reached humidity level {patch.current_humidity.value:.2f}% "
+                                self._logger.info(f"Zone {patch.zone.name} reached humidity level {patch.current_humidity_value:.2f}% "
                                                   f"above target {patch.target_humidity:.2f}% after {m:02d}:{s:02d} min, but continuing "
                                                   f"until minimum watering time of {self._min_minutes} min is met")
                     except Exception as e:

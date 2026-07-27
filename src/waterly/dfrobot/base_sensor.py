@@ -96,7 +96,8 @@ class BaseRS485ModbusSensor:
         """
         # noinspection PyBroadException
         try:
-            self._serial.open() if not self._serial.is_open else None
+            if not self._serial.is_open:
+                self._serial.open()
             self.get_device_address()   # forces a read to update the device presence status
         except Exception:
             pass

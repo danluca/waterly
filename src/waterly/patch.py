@@ -7,6 +7,7 @@ import logging
 from typing import Optional
 from gpiozero import OutputDevice
 from time import sleep
+from datetime import datetime
 
 from .model.measurement import Measurement
 from .model.zone import Zone
@@ -96,7 +97,7 @@ class Patch:
     @property
     def current_humidity(self) -> Optional[Measurement]:
         """
-        Gets the most recent humidity reading.
+        Gets the most recent humidity reading, no more than 2 polling intervals old.
 
         This property retrieves the latest humidity reading recorded by the system. It
         is useful in applications where real-time or most recent humidity levels are
@@ -105,6 +106,9 @@ class Patch:
         :return: The most recent humidity reading.
         :rtype: float
         """
+        poll_interval: int = int(CONFIG[Settings.SENSOR_READ_INTERVAL_SECONDS])
+        if self._last_humidity_reading is None or (datetime.now(CONFIG[Settings.LOCAL_TIMEZONE]) - self._last_humidity_reading.timestamp).total_seconds() > 2 * poll_interval:
+            return None
         return self._last_humidity_reading
 
     @property
@@ -185,8 +189,10 @@ class Patch:
         :return: None
         :rtype: None
         """
-        self.rh_sensor.open() if self.rh_sensor else None
-        self.npk_sensor.open() if self.npk_sensor else None
+        if self.rh_sensor:
+            self.rh_sensor.open()
+        if self.npk_sensor:
+            self.npk_sensor.open()
 
     def close_sensor_bus(self):
         """
@@ -194,8 +200,10 @@ class Patch:
 
         :return: None
         """
-        self.rh_sensor.close() if self.rh_sensor and self.rh_sensor.is_open else None
-        self.npk_sensor.close() if self.npk_sensor and self.npk_sensor.is_open else None
+        if self.rh_sensor and self.rh_sensor.is_open:
+            self.rh_sensor.close()
+        if self.npk_sensor and self.npk_sensor.is_open:
+            self.npk_sensor.close()
 
     def humidity(self) -> Optional[Measurement]:
         """
@@ -333,22 +341,28 @@ class Patch:
         """
         readings: dict[TrendName, Measurement] = {}
         now = now_local()
-        if self.has_rh_sensor and self.rh_sensor.is_open:
-            rh_all = self.rh_sensor.read_all()
-            readings[TrendName.TEMPERATURE] = Measurement(rh_all[SEN0604.ReadingType.TEMPERATURE], Unit.CELSIUS, now)
-            readings[TrendName.HUMIDITY] = Measurement(rh_all[SEN0604.ReadingType.MOISTURE], Unit.PERCENT, now)
-            self._last_humidity_reading = readings[TrendName.HUMIDITY]
-            readings[TrendName.ELECTRICAL_CONDUCTIVITY] = Measurement(rh_all[SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY], Unit.CONDUCTIVITY, now)
-            readings[TrendName.PH] = Measurement(rh_all[SEN0604.ReadingType.PH], Unit.PH, now)
-            readings[TrendName.SALINITY] = Measurement(rh_all[SEN0604.ReadingType.SALINITY], Unit.PPT, now)
-            readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = Measurement(rh_all[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS], Unit.PPM, now)
+        if self.has_rh_sensor:
+            if self.rh_sensor.is_open:
+                rh_all = self.rh_sensor.read_all()
+                readings[TrendName.TEMPERATURE] = Measurement(rh_all[SEN0604.ReadingType.TEMPERATURE], Unit.CELSIUS, now)
+                readings[TrendName.HUMIDITY] = Measurement(rh_all[SEN0604.ReadingType.MOISTURE], Unit.PERCENT, now)
+                self._last_humidity_reading = readings[TrendName.HUMIDITY]
+                readings[TrendName.ELECTRICAL_CONDUCTIVITY] = Measurement(rh_all[SEN0604.ReadingType.ELECTRICAL_CONDUCTIVITY], Unit.CONDUCTIVITY, now)
+                readings[TrendName.PH] = Measurement(rh_all[SEN0604.ReadingType.PH], Unit.PH, now)
+                readings[TrendName.SALINITY] = Measurement(rh_all[SEN0604.ReadingType.SALINITY], Unit.PPT, now)
+                readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = Measurement(rh_all[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS], Unit.PPM, now)
+            else:
+                self._logger.warning("Patch %s: Humidity sensor is present but bus NOT open", self.name)
         # both sensors are on the same serial port (RS485)
-        if self.has_npk_sensor and self.npk_sensor.is_open:
-            sleep(0.25)
-            npk_all = self.npk_sensor.read_all()
-            readings[TrendName.NITROGEN] = Measurement(npk_all[SEN0605.ReadingType.NITROGEN], Unit.MG_PER_KG, now)
-            readings[TrendName.PHOSPHORUS] = Measurement(npk_all[SEN0605.ReadingType.PHOSPHORUS], Unit.MG_PER_KG, now)
-            readings[TrendName.POTASSIUM] = Measurement(npk_all[SEN0605.ReadingType.POTASSIUM], Unit.MG_PER_KG, now)
+        if self.has_npk_sensor:
+            if self.npk_sensor is not None and self.npk_sensor.is_open:
+                sleep(0.25)
+                npk_all = self.npk_sensor.read_all()
+                readings[TrendName.NITROGEN] = Measurement(npk_all[SEN0605.ReadingType.NITROGEN], Unit.MG_PER_KG, now)
+                readings[TrendName.PHOSPHORUS] = Measurement(npk_all[SEN0605.ReadingType.PHOSPHORUS], Unit.MG_PER_KG, now)
+                readings[TrendName.POTASSIUM] = Measurement(npk_all[SEN0605.ReadingType.POTASSIUM], Unit.MG_PER_KG, now)
+            else:
+                self._logger.warning("Patch %s: NPK sensor is present but bus NOT open", self.name)
         return readings
 
     def needs_watering(self):
