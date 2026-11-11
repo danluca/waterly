@@ -242,21 +242,31 @@ def get_latest_sensors():
                 weather["next12"]["soil_moisture_unit"] = moisture_unit
         weather["timestamp"] = {"date": now.strftime("%b %d, %Y"), "time": now.strftime("%H:%M"), "utc": now.timestamp()}
         weather["location"] = CONFIG[Settings.LOCATION]
-        weather["prev12"]["soil_moisture_min"] = 100.0 * weather["prev12"]["soil_moisture_min"]
-        weather["prev12"]["soil_moisture_max"] = 100.0 * weather["prev12"]["soil_moisture_max"]
-        weather["next12"]["soil_moisture_min"] = 100.0 * weather["next12"]["soil_moisture_min"]
-        weather["next12"]["soil_moisture_max"] = 100.0 * weather["next12"]["soil_moisture_max"]
-        weather["prev12"]["soil_moisture_unit"] = Unit.PERCENT
-        weather["next12"]["soil_moisture_unit"] = Unit.PERCENT
+        if "soil_moisture_min" in weather["prev12"] and weather["prev12"]["soil_moisture_min"] is not None:
+            weather["prev12"]["soil_moisture_min"] = 100.0 * weather["prev12"]["soil_moisture_min"]
+        if "soil_moisture_max" in weather["prev12"] and weather["prev12"]["soil_moisture_max"] is not None:
+            weather["prev12"]["soil_moisture_max"] = 100.0 * weather["prev12"]["soil_moisture_max"]
+        if "soil_moisture_min" in weather["next12"] and weather["next12"]["soil_moisture_min"] is not None:
+            weather["next12"]["soil_moisture_min"] = 100.0 * weather["next12"]["soil_moisture_min"]
+        if "soil_moisture_max" in weather["next12"] and weather["next12"]["soil_moisture_max"] is not None:
+            weather["next12"]["soil_moisture_max"] = 100.0 * weather["next12"]["soil_moisture_max"]
+        if "soil_moisture_min" in weather["prev12"] or "soil_moisture_max" in weather["prev12"]:
+            weather["prev12"]["soil_moisture_unit"] = Unit.PERCENT
+        if "soil_moisture_min" in weather["next12"] or "soil_moisture_max" in weather["next12"]:
+            weather["next12"]["soil_moisture_unit"] = Unit.PERCENT
         forecast_time = CONFIG[Settings.WEATHER_LAST_CHECK_TIMESTAMP]
-        weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
+        if forecast_time is not None:
+            weather["forecast_time"] = {"date": forecast_time.strftime("%b %d, %Y"), "time": forecast_time.strftime("%H:%M"), "utc": forecast_time.timestamp()}
+        else:
+            weather["forecast_time"] = None
         next12_min = weather.get("next12", {}).get("temp_min")
         next12_unit = weather.get("next12", {}).get("temp_unit")
         freeze_point = 32.0 if next12_unit == Unit.FAHRENHEIT else 0.0
         weather["freeze_warning"] = is_in_gardening_season(now) and next12_min is not None and next12_min <= freeze_point
         result["weather"] = weather
-        result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars if ABOUT.wifi_rssi is not None else 0
-        result[RPI_ZONE_NAME]["fan_on"] = is_fan_on()
+        if RPI_ZONE_NAME in result:
+            result[RPI_ZONE_NAME]["wifi_bars"] = ABOUT.wifi_bars if ABOUT.wifi_rssi is not None else 0
+            result[RPI_ZONE_NAME]["fan_on"] = is_fan_on()
         return jsonify(result)
 
 @app.post("/api/water/<string:zone_name>/start")
