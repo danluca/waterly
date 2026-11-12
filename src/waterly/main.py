@@ -1,6 +1,6 @@
 #  MIT License
 #
-#  Copyright (c) 2025 by Dan Luca. All rights reserved.
+#  Copyright (c) by Dan Luca. All rights reserved.
 #
 import os.path
 import signal
@@ -13,9 +13,9 @@ import subprocess
 import json
 
 from importlib.metadata import version, PackageNotFoundError
-from .config import ZONES
+from .config import ZONES, CONFIG
 from .patch import PATCHES, initialize_patches
-from .storage import init_db, get_config_from_db, get_zones_from_db
+from .storage import init_db, get_config_from_db, get_zones_from_db, interrupt_purge_records
 from .pulses import PulseCounter
 from .scheduler import WateringManager
 from .weather import WeatherService
@@ -71,6 +71,7 @@ def main():
     get_system_info()
 
     # Storage
+    CONFIG.read_from_file()
     init_db()
     get_zones_from_db()
     get_config_from_db()
@@ -84,6 +85,7 @@ def main():
     pulses.start()
 
     initialize_patches(list(ZONES.values()))
+    interrupt_purge_records()
 
     manager = WateringManager(PATCHES, weather, pulses)
     manager.start()

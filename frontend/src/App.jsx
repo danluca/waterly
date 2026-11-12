@@ -3,12 +3,14 @@ import * as React from 'react';
 import { useState } from 'react';
 import { Container, Alert } from '@mui/material';
 import useAppData from './hooks/useAppData';
+import useMaintenanceStatus from './hooks/useMaintenanceStatus';
 import Header from './components/Header';
 import ZonesGrid from './components/ZonesGrid';
 import Footer from './components/Footer';
 import WaterDialog from './components/WaterDialog';
 import SettingsPage from './pages/Settings';
 import AboutPage from './pages/About';
+import ToolsPage from './pages/Tools';
 
 export default function App() {
     // Watering dialog state
@@ -19,8 +21,18 @@ export default function App() {
     const [starting, setStarting] = useState(false);
     const [started, setStarted] = useState(false);
     const [errorMsg, setErrorMsg] = useState('');
+    const {status: maintenance, error: maintenanceError, refresh: refreshMaintenance} = useMaintenanceStatus(waterDialogOpen);
     const { sensorData, manifest } = useAppData();
     const path = (typeof window !== 'undefined' && window.location && window.location.pathname) ? window.location.pathname : '/';
+    if (path.startsWith('/tools')) {
+        return (
+            <Container sx={{marginY: 4}}>
+                <Header sensorData={sensorData} title="Tools" />
+                <ToolsPage sensorData={sensorData} />
+                <Footer manifest={manifest} />
+            </Container>
+        );
+    }
     if (path.startsWith('/settings')) {
         return (
             <Container sx={{marginY: 4}}>
@@ -69,6 +81,7 @@ export default function App() {
         } catch (e) {
             setErrorMsg(String(e));
         } finally {
+            await refreshMaintenance().catch(() => {});
             setStarting(false);
         }
     };
@@ -86,6 +99,8 @@ export default function App() {
             closeWaterDialog();
         } catch (e) {
             setErrorMsg(String(e));
+        } finally {
+            await refreshMaintenance().catch(() => {});
         }
     };
 
@@ -114,6 +129,8 @@ export default function App() {
                 starting={starting}
                 onStart={handleStart}
                 onStop={handleStop}
+                wateringBlocked={!maintenance || !!maintenanceError || maintenance.winterized || !!maintenance.active}
+                wateringActive={maintenance?.watering}
             />
         </Container>
     );

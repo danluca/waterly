@@ -54,6 +54,28 @@ It allows changing the watering schedule and fertilization alert settings.
 
 ## Setup
 
+### Winterizing and manual air purging
+
+Open **Tools** from the main menu and use **Winterize / air purge**. First choose **Mark system
+winterized** to keep watering disabled between individual zone purges. Then
+open one zone valve for a selected duration (1–600 seconds). Isolate the water supply and connect your
+regulated air supply first; the app controls the zone valve, while you control
+the air supply. Use **Stop purge** to end a purge early, and repeat or select
+another zone as needed. Only one purge can run at a time; stop any active
+watering before starting.
+
+Manual and scheduled watering are blocked during purging. Purge history records
+the zone, requested and elapsed duration, and outcome separately from water
+consumption. The latest 20 purges appear in the panel. Purges stop automatically
+on their own timer, independent of sensor polling, and never resume after a
+restart; unfinished records are marked interrupted.
+
+Winterized mode blocks both manual and scheduled watering across restarts and
+the change of year. Air purging remains
+available while winterized. Choose **Re-enable watering** when ready to restore
+watering; a scheduled cycle that is already due may then run. The winterized
+control can be changed only when watering and purging are stopped.
+
 ### Parts List
 #### Irrigation system
 - 1 x [3 valves Orbit manifold](https://www.homedepot.com/p/Orbit-3-Valve-Inline-Manifold-Assembly-57253/202206757)

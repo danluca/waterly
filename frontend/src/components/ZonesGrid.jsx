@@ -1,12 +1,13 @@
 /*
  * MIT License
  *
- * Copyright (c) 2025 by Dan Luca. All rights reserved.
+ * Copyright (c) by Dan Luca. All rights reserved.
  *
  */
 
 import * as React from 'react';
-import {Box, Card, Chip, Grid, Typography} from '@mui/material';
+import {Box, Card, Chip, Grid, Tooltip, Typography} from '@mui/material';
+import AcUnitIcon from '@mui/icons-material/AcUnit';
 import SensorCard from './SensorCard';
 import { fmt } from '../utils/format';
 
@@ -26,6 +27,19 @@ const METRIC_DEFS = [
   {key: 'envtemp',      label: 'Temperature', unitKey: 'envtemp_unit'},
   {key: 'envhumidity',  label: 'Humidity',    unitKey: 'envhumidity_unit'},
 ];
+
+function frostIcon(period, label) {
+  const threshold = {'\u00b0C': 0, '\u00b0F': 32}[period?.temp_unit];
+  if (threshold === undefined || !Number.isFinite(period?.temp_min) || period.temp_min >= threshold) {
+    return null;
+  }
+  const description = `Below freezing ${label}`;
+  return (
+    <Tooltip title={description}>
+      <AcUnitIcon color="info" fontSize="small" role="img" aria-label={description} />
+    </Tooltip>
+  );
+}
 
 export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
   const weather = sensorData?.weather;
@@ -153,6 +167,7 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
                     <SensorCard subtitle="Temperature"
                       value={`${fmt(weather.prev12?.temp_min)} - ${fmt(weather.prev12?.temp_max)}`}
                       unit={weather.prev12?.temp_unit}
+                      headerIcon={frostIcon(weather.prev12, 'in the previous 12 hours')}
                       bgColor={'#F1F2F3'}
                     />
                   </Grid>
@@ -178,6 +193,7 @@ export default function ZonesGrid({ sensorData, onOpenWaterDialog }) {
                     <SensorCard subtitle="Temperature"
                       value={`${fmt(weather.next12?.temp_min)} - ${fmt(weather.next12?.temp_max)}`}
                       unit={weather.next12?.temp_unit}
+                      headerIcon={frostIcon(weather.next12, 'in the next 12 hours')}
                     />
                   </Grid>
                   <Grid item sx={{height: '100%'}}>

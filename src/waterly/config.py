@@ -70,6 +70,7 @@ class Settings(StrEnum):
     WATERING_MAX_MINUTES_PER_ZONE = "watering_max_minutes_per_zone", 10
     WATERING_MIN_MINUTES_PER_ZONE = "watering_min_minutes_per_zone", 5
     LAST_WATERING_DATE = "last_watering_date", None
+    WINTERIZED = "winterized", False
     RAIN_CANCEL_PROBABILITY_THRESHOLD = "rain_cancel_probability_threshold", 50.0   # 50%
     UNITS = "units", UnitType.IMPERIAL
     WEATHER_CHECK_INTERVAL_SECONDS = "weather_check_interval_seconds", 6*3600       # 6 hours

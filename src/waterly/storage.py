@@ -181,8 +181,10 @@ def get_config_from_db() -> AppConfig:
             if setting.name in raw_settings:
                 CONFIG.set_transient(setting, json.loads(raw_settings[setting.name]))
             else:
-                CONFIG.set_transient(setting, setting.default)
-                cur.execute("INSERT INTO config(type, value) VALUES (?, ?)", (setting.name, json.dumps(setting.default)))
+                # Carry the winter lockout into a new year's database from settings.json.
+                value = CONFIG[setting] if setting == Settings.WINTERIZED else setting.default
+                CONFIG.set_transient(setting, value)
+                cur.execute("INSERT INTO config(type, value) VALUES (?, ?)", (setting.name, json.dumps(value)))
                 conn.commit()
         return CONFIG
 
@@ -218,8 +220,34 @@ def save_config_item(item: Settings, value: dict[str, Any]):
     """
     with db() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE config SET value=? WHERE type=?", (json.dumps(value), item.name))
+        cur.execute("INSERT INTO config(type, value) VALUES (?, ?) ON CONFLICT(type) DO UPDATE SET value=excluded.value",
+                    (item.name, json.dumps(value)))
         conn.commit()
+
+
+def start_purge_record(zone: str, seconds: int) -> int:
+    with db() as conn:
+        return conn.execute(
+            "INSERT INTO purge_log(zone, started_at, requested_seconds, outcome) VALUES (?, ?, ?, 'running')",
+            (zone, datetime.now(UTC).isoformat(), seconds)).lastrowid
+
+
+def finish_purge_record(record_id: int, duration: float, outcome: str):
+    with db() as conn:
+        conn.execute("UPDATE purge_log SET ended_at=?, duration_seconds=?, outcome=? WHERE id=?",
+                     (datetime.now(UTC).isoformat(), duration, outcome, record_id))
+
+
+def interrupt_purge_records():
+    # A restart never resumes a purge; its actual end time cannot be inferred.
+    with db() as conn:
+        conn.execute("UPDATE purge_log SET outcome='interrupted' WHERE outcome='running'")
+
+
+def get_purge_history() -> list[dict]:
+    with db() as conn:
+        conn.row_factory = sqlite3.Row
+        return [dict(row) for row in conn.execute("SELECT * FROM purge_log ORDER BY id DESC LIMIT 20")]
 
 def get_zones_from_db() -> dict[int, Zone]:
     """

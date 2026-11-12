@@ -24,6 +24,7 @@ from .queues import receive_scheduler_message, QueueMessage, Action
 from .storage import record_npk, record_rh, record_watering, record_rpi_temperature, TrendName, \
     record_watering_assessment, record_waterlog, record_env_temperature, record_env_humidity
 from .weather import WeatherService
+from .maintenance import MAINTENANCE
 
 _logger = logging.getLogger(__name__)
 
@@ -106,6 +107,8 @@ class WateringManager:
         self._logger = logging.getLogger(__name__)
         self._manual_mode: dict = {}
         self._last_sensor_poll: int = 0
+        MAINTENANCE.configure(patches, pulses.reset_count)
+        self._auto_cancelled = False
 
     def start(self):
         """
@@ -131,6 +134,7 @@ class WateringManager:
         """
         self._stop.set()
         self._thread.join(timeout=5)
+        MAINTENANCE.stop('shutdown')
         for patch in self.patches:
             patch.stop_watering()
 
@@ -186,9 +190,17 @@ class WateringManager:
                 if patch is None:
                     self._logger.warning(f"START_WATERING could not find zone '{zone_name}' - ignoring request")
                     return
+                if not MAINTENANCE.begin_watering(data.get('generation')):
+                    self._logger.warning('Manual watering rejected: another operation, winterized mode, or stale request')
+                    return
                 self._logger.info(f"Manual start watering request accepted for zone {zone_name} for {minutes or self._max_minutes} minutes")
                 self._manual_mode[zone_name] = {"state": "accepted", "duration": minutes or self._max_minutes}
             elif msg.action == Action.STOP_WATERING:
+                if MAINTENANCE.active or not MAINTENANCE.watering:
+                    return
+                was_manual = bool(self._manual_mode)
+                if not was_manual:
+                    self._auto_cancelled = True
                 data = msg.data or {}
                 zone_name = str(data.get("zone") or "").strip()
                 if not zone_name:
@@ -236,6 +248,8 @@ class WateringManager:
                     patch.close_sensor_bus()
                     self._manual_mode.pop(zone_name, None)
                     self._logger.info(f"Manual watering STOP for zone {zone_name} acknowledged (not running)")
+                if was_manual and not self._manual_mode:
+                    MAINTENANCE.end_watering()
         except Exception as e:
             self._logger.error(f"Failed to handle scheduler message: {e}", exc_info=True)
             pass
@@ -258,6 +272,15 @@ class WateringManager:
             self._last_sensor_poll = epoch
 
     def _handle_auto_watering(self):
+        if self._manual_mode or not MAINTENANCE.begin_watering():
+            return
+        try:
+            self._auto_cancelled = False
+            self._assess_auto_watering()
+        finally:
+            MAINTENANCE.end_watering()
+
+    def _assess_auto_watering(self):
         """
         Checks and handles the automatic garden watering process. This method ensures that
         the watering is performed only once per day, taking into account various conditions
@@ -307,6 +330,13 @@ class WateringManager:
                     self._last_watering_date = today_key
 
     def _handle_manual_watering(self):
+        try:
+            self._advance_manual_watering()
+        finally:
+            if not self._manual_mode:
+                MAINTENANCE.end_watering()
+
+    def _advance_manual_watering(self):
         """
         Non-blocking manual watering state machine.
 
@@ -655,6 +685,8 @@ class WateringManager:
                         return
                     # Drain the message queue so STOP_WATERING requests aren't silently dropped
                     self._handle_thread_messages()
+                    if self._auto_cancelled:
+                        break
                     # Check humidity threshold; sensor failures are non-fatal — fall through to the time limit.
                     # Keep the valve running for at least the configured minimum even once the target is reached.
                     try:
@@ -693,6 +725,8 @@ class WateringManager:
                 self._logger.info(f"Zone {patch.zone.name} watered for {m:02d}:{s:02d} min. Used ~{msmt.value:.2f} "
                                   f"{msmt.unit} of water and ended at humidity level {humid_stop_str}")
                 record_waterlog(WateringRecord(patch.zone, True, msmt), weather_assessment)
+                if self._auto_cancelled:
+                    return
                 # Wait a bit before starting the next zone; allows the water valves to close properly before starting the next one
                 self._stop.wait(10.0)
                 if self._stop.is_set():

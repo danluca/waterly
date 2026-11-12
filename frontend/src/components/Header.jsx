@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2025 by Dan Luca. All rights reserved.
+ * Copyright (c) by Dan Luca. All rights reserved.
  *
  */
 
@@ -16,7 +16,7 @@ import SignalWifi3BarIcon from '@mui/icons-material/SignalWifi3Bar';
 import SignalWifi4BarIcon from '@mui/icons-material/SignalWifi4Bar';
 import SignalWifiOffIcon from '@mui/icons-material/SignalWifiOff';
 
-export default function Header({ sensorData }) {
+export default function Header({ sensorData, title = 'Dashboard' }) {
   const wifiBars = (sensorData && sensorData.RPI && typeof sensorData.RPI.wifi_bars === 'number')
     ? Math.max(0, Math.min(4, Math.floor(sensorData.RPI.wifi_bars)))
     : null;
@@ -82,7 +82,7 @@ export default function Header({ sensorData }) {
       </Box>
 
       <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2}}>
-        <Typography variant="h5">Readings</Typography>
+        <Typography variant="h5">{title}</Typography>
         <Box sx={{position:'absolute', right:32, display:'flex', alignItems:'center', gap: 1.25}}>
           <Tooltip title={`Wi‑Fi signal ${wifiBars == null ? 'unknown' : wifiBars + ' bars'}`} placement="bottom">
             <Box aria-label="wifi-signal" sx={{display:'flex', alignItems:'center', mr: 0.5}}>
@@ -90,6 +90,7 @@ export default function Header({ sensorData }) {
             </Box>
           </Tooltip>
           <Link href="/settings" underline="hover" sx={{backgroundColor:'#fff', fontFamily: 'Roboto', fontWeight: 400, p: '6px 10px', border: '1px solid', borderColor: 'divider', borderRadius: 1, boxShadow: 2, transition: 'background-color 0.2s ease', '&:hover': { backgroundColor: '#FFE8CC' }}}>Settings</Link>
+          <Link href="/tools" underline="hover" sx={{backgroundColor:'#fff', fontFamily: 'Roboto', fontWeight: 400, p: '6px 10px', border: '1px solid', borderColor: 'divider', borderRadius: 1, boxShadow: 2, transition: 'background-color 0.2s ease', '&:hover': { backgroundColor: '#FFE8CC' }}}>Tools</Link>
           <Link href="/about" underline="hover" sx={{backgroundColor:'#fff', fontFamily: 'Roboto', fontWeight: 400, p: '6px 10px', border: '1px solid', borderColor: 'divider', borderRadius: 1, boxShadow: 2, transition: 'background-color 0.2s ease', '&:hover': { backgroundColor: '#FFE8CC' }}}>About</Link>
         </Box>
       </Box>

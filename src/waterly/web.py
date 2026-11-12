@@ -22,7 +22,8 @@ from .model.times import valid_timezone, now_local
 from .model.units import UnitType, Unit
 from .model.about import ABOUT
 from .config import get_project_root, CONFIG, Settings, RPI_ZONE_NAME
-from .storage import db
+from .storage import db, get_purge_history
+from .maintenance import MAINTENANCE, OperationConflict
 
 HTTP_HOST = "0.0.0.0"
 HTTP_PORT = 8080
@@ -290,13 +291,57 @@ def api_start_watering(zone_name: str):
             return jsonify({"error": "invalid_request", "message": f"Invalid 'minutes' value: {e}"}), 400
 
     try:
-        msg = QueueMessage(Action.START_WATERING, {"zone": zone_name, "minutes": minutes})
-        send_message_to_scheduler(msg)
+        with MAINTENANCE.lock:
+            generation = MAINTENANCE.watering_token()
+            if MAINTENANCE.watering:
+                raise OperationConflict('Watering is already active.')
+            msg = QueueMessage(Action.START_WATERING, {"zone": zone_name, "minutes": minutes, "generation": generation})
+            send_message_to_scheduler(msg)
+    except OperationConflict as e:
+        return jsonify({'error': 'conflict', 'message': str(e)}), 409
     except Exception as e:
         logging.getLogger(__name__).error(f"Failed to enqueue start watering message: {e}")
         return jsonify({"error": "internal_error", "message": "Could not submit watering request"}), 500
 
     return jsonify({"status": "accepted", "zone": zone_name, "minutes": minutes}), 202
+
+
+@app.get('/api/maintenance')
+def maintenance_status():
+    return jsonify({**MAINTENANCE.status(), 'history': get_purge_history()})
+
+
+@app.post('/api/maintenance/winterized')
+def set_winterized():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or type(body.get('winterized')) is not bool:
+        return jsonify({'message': 'winterized must be a boolean.'}), 400
+    try:
+        MAINTENANCE.set_winterized(body['winterized'])
+        return jsonify(MAINTENANCE.status())
+    except OperationConflict as e:
+        return jsonify({'message': str(e)}), 409
+
+
+@app.post('/api/purge/<string:zone_name>/start')
+def start_purge(zone_name):
+    patch = next((p for p in PATCHES if p.zone.name == zone_name), None)
+    if patch is None:
+        return jsonify({'message': f"Zone '{zone_name}' not found."}), 404
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({'message': 'Expected JSON object with seconds.'}), 400
+    try:
+        return jsonify(MAINTENANCE.start(patch, body.get('seconds')))
+    except ValueError as e:
+        return jsonify({'message': str(e)}), 400
+    except OperationConflict as e:
+        return jsonify({'message': str(e)}), 409
+
+
+@app.post('/api/purge/stop')
+def stop_purge():
+    return jsonify(MAINTENANCE.stop())
 
 
 @app.post("/api/water/<string:zone_name>/stop")
@@ -320,6 +365,8 @@ def api_stop_watering(zone_name: str):
 # Settings page and Config API
 # --------------------------
 @app.get("/settings")
+@app.get("/tools")
+@app.get("/tools.html")
 @app.get("/about")
 @app.get("/settings.html")
 def settings_page():
