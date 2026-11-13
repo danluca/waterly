@@ -46,8 +46,9 @@ class Patch:
         """
         self.zone = zone
         self.relay_device: OutputDevice = OutputDevice(self.zone.relay_address)
-        self.npk_sensor: Optional[SEN0605] = SEN0605(self.zone.npk_sensor_address) if self.zone.npk_sensor_address else None
-        self.rh_sensor: SEN0604 = SEN0604(self.zone.rh_sensor_address)
+        # Inventory bindings are applied by the scheduler, which owns serial I/O.
+        self.npk_sensor = None
+        self.rh_sensor = None
         #minimum sensor reading to trigger watering - depending on environmental conditions, sensor placement, this can vary from zone to zone
         self.min_sensor_humidity: float = CONFIG[Settings.MINIMUM_SENSOR_HUMIDITY_PERCENT][self.zone.name]
         self.target_humidity: float = CONFIG[Settings.HUMIDITY_TARGET_PERCENT][self.zone.name]
@@ -189,10 +190,12 @@ class Patch:
         :return: None
         :rtype: None
         """
-        if self.rh_sensor:
-            self.rh_sensor.open()
-        if self.npk_sensor:
-            self.npk_sensor.open()
+        for sensor in (self.rh_sensor, self.npk_sensor):
+            if sensor:
+                try:
+                    sensor.open()
+                except Exception:
+                    self._logger.warning('Sensor at %#x unavailable in %s', sensor.device_addr, self.name, exc_info=True)
 
     def close_sensor_bus(self):
         """
@@ -341,8 +344,8 @@ class Patch:
         """
         readings: dict[TrendName, Measurement] = {}
         now = now_local()
-        if self.has_rh_sensor:
-            if self.rh_sensor.is_open:
+        if self.has_rh_sensor and self.rh_sensor.is_open:
+            try:
                 rh_all = self.rh_sensor.read_all()
                 readings[TrendName.TEMPERATURE] = Measurement(rh_all[SEN0604.ReadingType.TEMPERATURE], Unit.CELSIUS, now)
                 readings[TrendName.HUMIDITY] = Measurement(rh_all[SEN0604.ReadingType.MOISTURE], Unit.PERCENT, now)
@@ -351,18 +354,18 @@ class Patch:
                 readings[TrendName.PH] = Measurement(rh_all[SEN0604.ReadingType.PH], Unit.PH, now)
                 readings[TrendName.SALINITY] = Measurement(rh_all[SEN0604.ReadingType.SALINITY], Unit.PPT, now)
                 readings[TrendName.TOTAL_DISSOLVED_SOLIDS] = Measurement(rh_all[SEN0604.ReadingType.TOTAL_DISSOLVED_SOLIDS], Unit.PPM, now)
-            else:
-                self._logger.warning("Patch %s: Humidity sensor is present but bus NOT open", self.name)
+            except Exception:
+                self._logger.warning('Soil sensor read failed in %s', self.name, exc_info=True)
         # both sensors are on the same serial port (RS485)
-        if self.has_npk_sensor:
-            if self.npk_sensor is not None and self.npk_sensor.is_open:
+        if self.has_npk_sensor and self.npk_sensor.is_open:
+            try:
                 sleep(0.25)
                 npk_all = self.npk_sensor.read_all()
                 readings[TrendName.NITROGEN] = Measurement(npk_all[SEN0605.ReadingType.NITROGEN], Unit.MG_PER_KG, now)
                 readings[TrendName.PHOSPHORUS] = Measurement(npk_all[SEN0605.ReadingType.PHOSPHORUS], Unit.MG_PER_KG, now)
                 readings[TrendName.POTASSIUM] = Measurement(npk_all[SEN0605.ReadingType.POTASSIUM], Unit.MG_PER_KG, now)
-            else:
-                self._logger.warning("Patch %s: NPK sensor is present but bus NOT open", self.name)
+            except Exception:
+                self._logger.warning('NPK sensor read failed in %s', self.name, exc_info=True)
         return readings
 
     def needs_watering(self):

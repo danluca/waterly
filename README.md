@@ -76,6 +76,34 @@ available while winterized. Choose **Re-enable watering** when ready to restore
 watering; a scheduled cycle that is already due may then run. The winterized
 control can be changed only when watering and purging are stopped.
 
+### Sensor configuration
+
+Open **Tools → Sensors** in the web interface to add or edit a sensor's name, model,
+RS485 address, zone assignment, and polling enablement. Addresses accept decimal
+or hexadecimal notation, such as `10` or `0x0A`. This changes the address GardenPy
+contacts; configure the physical device's address separately before adding it.
+
+The first startup with this version migrates the existing zone sensor addresses
+into a sensor inventory in SQLite, preserving zone IDs and measurement history.
+Subsequent startups retain edits rather than reimporting the legacy address columns.
+New annual databases carry the inventory forward from the latest preceding database
+that contains it, while response status and queued tests start fresh.
+SEN0604 soil and SEN0605 NPK sensors can be assigned to garden zones; SEN0438 air
+sensors use ENV. Each zone supports one sensor of each compatible type. A sensor
+can also remain unassigned for testing. Addresses and zone/type slots remain
+reserved while disabled; unassign a disabled sensor to free its zone slot.
+
+**Test connection** queues a read through the scheduler and displays the result,
+latest readings in native sensor units, and last successful response time. Tests
+also work for disabled or unassigned sensors. The scheduler checks queued tests
+and saved changes every 15 seconds while watering and purging are idle. Save the
+form before testing. Configuration changes clear cached zone moisture readings
+and request a fresh poll. Zones without usable moisture readings retain the
+existing timed watering fallback. Moving a sensor affects future measurements;
+historical measurements stay with their original zone.
+
+Sensor scanning and physical address programming are not included.
+
 ### Parts List
 #### Irrigation system
 - 1 x [3 valves Orbit manifold](https://www.homedepot.com/p/Orbit-3-Valve-Inline-Manifold-Assembly-57253/202206757)

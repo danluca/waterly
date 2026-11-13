@@ -11,7 +11,7 @@ import json
 from dataclasses import asdict
 from datetime import datetime
 from pytz import timezone
-from flask import Flask, jsonify, request, render_template, send_from_directory, abort, Response
+from flask import Flask, jsonify, request, render_template, send_from_directory, abort, Response, redirect
 from werkzeug.exceptions import HTTPException
 
 from .patch import PATCHES
@@ -24,6 +24,7 @@ from .model.about import ABOUT
 from .config import get_project_root, CONFIG, Settings, RPI_ZONE_NAME
 from .storage import db, get_purge_history
 from .maintenance import MAINTENANCE, OperationConflict
+from .sensors import inventory, save_sensor, request_test, InventoryConflict
 
 HTTP_HOST = "0.0.0.0"
 HTTP_PORT = 8080
@@ -382,6 +383,37 @@ def settings_page():
 def get_config():
     # return jsonify(CONFIG.to_json())
     return Response(CONFIG.to_json(), mimetype="application/json")
+
+
+@app.get('/api/sensors')
+def get_sensor_inventory():
+    return jsonify(inventory())
+
+
+@app.get('/sensors')
+def sensors_page_redirect():
+    return redirect('/tools#sensors')
+
+
+@app.post('/api/sensors')
+@app.put('/api/sensors/<int:sensor_id>')
+def update_sensor_inventory(sensor_id=None):
+    try:
+        saved_id = save_sensor(request.get_json(silent=True), sensor_id)
+        return jsonify({'id': saved_id, 'message': 'Saved. Changes apply when watering is idle.'}), 201 if sensor_id is None else 200
+    except InventoryConflict as exc:
+        return jsonify({'message': str(exc)}), 409
+    except ValueError as exc:
+        return jsonify({'message': str(exc)}), 400
+
+
+@app.post('/api/sensors/<int:sensor_id>/test')
+def test_sensor_connection(sensor_id):
+    try:
+        request_test(sensor_id)
+        return jsonify({'message': 'Connection test queued; it will run when watering is idle.'}), 202
+    except KeyError:
+        return jsonify({'message': 'Sensor not found.'}), 404
 
 @app.post("/api/config")
 def update_config():

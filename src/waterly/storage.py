@@ -9,9 +9,10 @@ import sqlite3
 import hashlib
 import logging
 import re
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import datetime, UTC
 from typing import Any
+from pathlib import Path
 
 from .config import get_project_root, Settings, CONFIG, RPI_ZONE_NAME, ZONES, AppConfig, ENV_ZONE_NAME
 from .model.measurement import Measurement, WateringMeasurement
@@ -131,6 +132,7 @@ def init_db():
     latest_version = version_match.group(1)
     with db() as conn:
         cur = conn.cursor()
+        new_database = not __is_db_initialized(conn)
         if __is_db_initialized(conn):
             db_version, checksum = get_db_version(conn)
             if db_version == latest_version:
@@ -158,6 +160,37 @@ def init_db():
                     logger.info(f"Migration {script_version} completed")
                 else:
                     logger.info(f"Migration {script_version} already applied")
+        if new_database:
+            carry_forward_sensor_inventory(conn)
+
+
+def carry_forward_sensor_inventory(conn):
+    """Keep hardware configuration when a new annual measurement database is created."""
+    current = Path(conn.execute('PRAGMA database_list').fetchone()[2])
+    match = re.fullmatch(r'waterly-(\d{4})\.sqlite', current.name)
+    if not match:
+        return
+    candidates = sorted((p for p in current.parent.glob('waterly-*.sqlite')
+                         if re.fullmatch(r'waterly-\d{4}\.sqlite', p.name) and p.name < current.name), reverse=True)
+    for previous in candidates:
+        with closing(sqlite3.connect(previous.as_uri() + '?mode=ro', uri=True)) as source:
+            if not source.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sensor'").fetchone():
+                continue
+            rows = source.execute('SELECT s.id,s.name,s.type,s.address,z.name,s.enabled FROM sensor s '
+                                  'LEFT JOIN zone z ON z.id=s.zone_id').fetchall()
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            conn.execute('DELETE FROM sensor')
+            for sensor_id, name, model, address, zone, enabled in rows:
+                conn.execute('INSERT INTO sensor(id,name,type,address,zone_id,enabled) '
+                             'VALUES(?,?,?,?,(SELECT id FROM zone WHERE name=?),?)',
+                             (sensor_id, name, model, address, zone, enabled))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        logging.getLogger(__name__).info('Carried sensor inventory forward from %s', previous.name)
+        return
 
 
 def get_config_from_db() -> AppConfig:

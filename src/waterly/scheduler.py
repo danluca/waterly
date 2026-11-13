@@ -25,6 +25,7 @@ from .storage import record_npk, record_rh, record_watering, record_rpi_temperat
     record_watering_assessment, record_waterlog, record_env_temperature, record_env_humidity
 from .weather import WeatherService
 from .maintenance import MAINTENANCE
+from .sensors import inventory, apply_inventory, run_pending_tests, InventorySensor
 
 _logger = logging.getLogger(__name__)
 
@@ -509,6 +510,7 @@ class WateringManager:
         # Sensors polling loop and daily schedule orchestration
         while not self._stop.is_set():
             try:
+                self._handle_sensor_inventory()
                 self._handle_thread_messages()
 
                 self._handle_sensor_polling()
@@ -522,6 +524,16 @@ class WateringManager:
                 self._logger.error(f"WateringManager iteration failed, will retry next tick: {e}", exc_info=True)
 
             self._stop.wait(15.0)
+
+    def _handle_sensor_inventory(self):
+        # Serial work stays on this thread. Preserve bindings during valve operations.
+        if MAINTENANCE.watering or MAINTENANCE.active or self._manual_mode or any(p.water_state for p in self.patches):
+            return
+        sensors = inventory()['sensors']
+        apply_inventory(self.patches, sensors)
+        if any(s['pending'] for s in sensors):
+            self._last_sensor_poll = 0
+        run_pending_tests(sensors)
 
     def _poll_sensors(self):
         """
@@ -587,15 +599,13 @@ class WateringManager:
         self.adjust_cooling(rpi_temp)
         # read env temperature and humidity
         # Get the env Zone object (or None if not found)
-        env_zone = next((z for z in ZONES.values() if z.name == ENV_ZONE_NAME), None)
-        if env_zone is None:
-            self._logger.warning(f"Environment zone '{ENV_ZONE_NAME}' not found, skipping env sensor readings")
-        else:
-            sensor = SEN0438(env_zone.rh_sensor_address)
+        env_config = next((s for s in inventory()['sensors'] if s['enabled'] and s['zone'] == ENV_ZONE_NAME and s['type'] == 'SEN0438'), None)
+        if env_config is not None:
+            sensor = InventorySensor(env_config)
             try:
                 sensor.open()
                 if not sensor.is_present:
-                    self._logger.info(f"No env sensor readings available (0X{env_zone.rh_sensor_address:X})")
+                    self._logger.info(f"No env sensor readings available (0X{sensor.device_addr:X})")
                 else:
                     env_readings = sensor.read_all()
                     env_temp = Measurement(env_readings[SEN0438.ReadingType.AIR_TEMPERATURE], Unit.CELSIUS, ts)
@@ -603,9 +613,9 @@ class WateringManager:
                     record_env_temperature(env_temp_r)
                     env_humid = Measurement(env_readings[SEN0438.ReadingType.HUMIDITY], Unit.PERCENT, ts)
                     record_env_humidity(env_humid)
-                    self._logger.info(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read successful; readings Temp {env_temp_r.value:.2f} {env_temp_r.unit}, RH {env_humid.value:.2f}%")
+                    self._logger.info(f"Env sensor (0X{sensor.device_addr:X}) read successful; readings Temp {env_temp_r.value:.2f} {env_temp_r.unit}, RH {env_humid.value:.2f}%")
             except Exception as e:
-                self._logger.warning(f"Env sensor (0X{env_zone.rh_sensor_address:X}) read failed, skipping: {e}")
+                self._logger.warning(f"Env sensor (0X{sensor.device_addr:X}) read failed, skipping: {e}")
             finally:
                 sensor.close()
         self._logger.info("Storage of sensor readings finished")

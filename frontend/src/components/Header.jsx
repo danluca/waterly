@@ -83,7 +83,7 @@ export default function Header({ sensorData, title = 'Dashboard' }) {
 
       <Box sx={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2}}>
         <Typography variant="h5">{title}</Typography>
-        <Box sx={{position:'absolute', right:32, display:'flex', alignItems:'center', gap: 1.25}}>
+        <Box sx={{display:'flex', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems:'center', gap: 1.25}}>
           <Tooltip title={`Wi‑Fi signal ${wifiBars == null ? 'unknown' : wifiBars + ' bars'}`} placement="bottom">
             <Box aria-label="wifi-signal" sx={{display:'flex', alignItems:'center', mr: 0.5}}>
               <WifiIcon sx={{ color: wifiColor }} />
